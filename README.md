@@ -63,6 +63,88 @@ Manual Review
 
 Transfer all balances, not using `netBalance`
 
+
+
+## Discussion
+
+**Jiaren-tang**
+
+.
+
+**Jiaren-tang**
+
+Escalate for 10 USDC. do not think this can be a high vulnerability because of the following reason
+
+this is a medium because first, the protocol can use flashbot to avoid frontrunning
+
+this is loss of reward not lose of user fund
+
+this griefing attack has no gain from attacker at all
+
+https://docs.sherlock.xyz/audits/judging/judging
+
+> Medium: There is a viable scenario (even if unlikely) that could cause the protocol to enter a state where a material amount of funds can be lost. The attack path is possible with assumptions that either mimic on-chain conditions or reflect conditions that have a reasonable chance of becoming true in the future. The more expensive the attack is for an attacker, the less likely it will be included as a Medium (holding all other factors constant). The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+
+we consider the attack is cost high becaues the attacker needs to monitor the pending claim transaction from notional side while has no economic gain
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC. do not think this can be a high vulnerability because of the following reason
+> 
+> this is a medium because first, the protocol can use flashbot to avoid frontrunning
+> 
+> this is loss of reward not lose of user fund
+> 
+> this griefing attack has no gain from attacker at all
+> 
+> https://docs.sherlock.xyz/audits/judging/judging
+> 
+> > Medium: There is a viable scenario (even if unlikely) that could cause the protocol to enter a state where a material amount of funds can be lost. The attack path is possible with assumptions that either mimic on-chain conditions or reflect conditions that have a reasonable chance of becoming true in the future. The more expensive the attack is for an attacker, the less likely it will be included as a Medium (holding all other factors constant). The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+> 
+> we consider the attack is cost high becaues the attacker needs to monitor the pending claim transaction from notional side while has no economic gain
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**0xleastwood**
+
+> Escalate for 10 USDC. do not think this can be a high vulnerability because of the following reason
+> 
+> this is a medium because first, the protocol can use flashbot to avoid frontrunning
+> 
+> this is loss of reward not lose of user fund
+> 
+> this griefing attack has no gain from attacker at all
+> 
+> https://docs.sherlock.xyz/audits/judging/judging
+> 
+> > Medium: There is a viable scenario (even if unlikely) that could cause the protocol to enter a state where a material amount of funds can be lost. The attack path is possible with assumptions that either mimic on-chain conditions or reflect conditions that have a reasonable chance of becoming true in the future. The more expensive the attack is for an attacker, the less likely it will be included as a Medium (holding all other factors constant). The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+> 
+> we consider the attack is cost high becaues the attacker needs to monitor the pending claim transaction from notional side while has no economic gain
+
+I disagree, `COMP` rewards continuously accrue over time and hence this function can be called at any time to lose rewards. This attack is not expensive at all to perform and can be profitable in other ways that aren't immediately apparent. The difference between `high` and `medium` risk within the context of Sherlock's judging is `There is a viable scenario (even if unlikely)` vs `This vulnerability would result in a material loss of funds, and the cost of the attack is low (relative to the amount of funds lost)`. It is clear that this fits the criteria of the latter.
+
+**Trumpero**
+
+Agree with the comment by Leastwood, this issue should be high
+
+**hrishibhat**
+
+Result:
+High
+Has duplicates
+Given that the rewards are an integral part of protocol these would be stuck in the contract due to the exploit considering this as a valid high
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [ShadowForce](https://github.com/sherlock-audit/2023-03-notional-judging/issues/168/#issuecomment-1570489952): rejected
+
 # Issue H-2: repayAccountPrimeDebtAtSettlement() user lost residual cash 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/172 
@@ -876,7 +958,639 @@ Consider wrapping `ETH` under all circumstances. This will prevent vault account
 
 Valid Issue, in our fixes we remove transfers from Settle Vault Account.
 
-# Issue M-1: Fee on transfer tokens will break the withdrawing process 
+# Issue H-9: Possible to create vault positions ineligible for liquidation 
+
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/202 
+
+## Found by 
+xiaoming90
+## Summary
+
+Users can self-liquidate their secondary debt holdings in such a way that it is no longer possible to deleverage their vault account as `checkMinBorrow` will fail post-maturity.
+
+## Vulnerability Detail
+
+When deleveraging a vault account, the liquidator will pay down account debt directly and the account will not accrue any cash. Under most circumstances, it is not possible to put an account's debt below its minimum borrow size. 
+
+However, there are _two_ exceptions to this:
+ - Liquidators purchasing cash from a vault account. This only applies to non-prime vault accounts.
+ - A vault account is being settled and `checkMinBorrow` is skipped to ensure an account can always be settled.
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L57-L119
+
+```solidity
+File: VaultLiquidationAction.sol
+057:     function deleverageAccount(
+058:         address account,
+059:         address vault,
+060:         address liquidator,
+061:         uint16 currencyIndex,
+062:         int256 depositUnderlyingInternal
+063:     ) external payable nonReentrant override returns (
+064:         uint256 vaultSharesToLiquidator,
+065:         int256 depositAmountPrimeCash
+066:     ) {
+067:         require(currencyIndex < 3);
+068:         (
+069:             VaultConfig memory vaultConfig,
+070:             VaultAccount memory vaultAccount,
+071:             VaultState memory vaultState
+072:         ) = _authenticateDeleverage(account, vault, liquidator);
+073: 
+074:         PrimeRate memory pr;
+075:         // Currency Index is validated in this method
+076:         (
+077:             depositUnderlyingInternal,
+078:             vaultSharesToLiquidator,
+079:             pr
+080:         ) = IVaultAccountHealth(address(this)).calculateDepositAmountInDeleverage(
+081:             currencyIndex, vaultAccount, vaultConfig, vaultState, depositUnderlyingInternal
+082:         );
+083: 
+084:         uint16 currencyId = vaultConfig.borrowCurrencyId;
+085:         if (currencyIndex == 1) currencyId = vaultConfig.secondaryBorrowCurrencies[0];
+086:         else if (currencyIndex == 2) currencyId = vaultConfig.secondaryBorrowCurrencies[1];
+087: 
+088:         Token memory token = TokenHandler.getUnderlyingToken(currencyId);
+089:         // Excess ETH is returned to the liquidator natively
+090:         (/* */, depositAmountPrimeCash) = TokenHandler.depositUnderlyingExternal(
+091:             liquidator, currencyId, token.convertToExternal(depositUnderlyingInternal), pr, false 
+092:         );
+093: 
+094:         // Do not skip the min borrow check here
+095:         vaultAccount.vaultShares = vaultAccount.vaultShares.sub(vaultSharesToLiquidator);
+096:         if (vaultAccount.maturity == Constants.PRIME_CASH_VAULT_MATURITY) {
+097:             // Vault account will not incur a cash balance if they are in the prime cash maturity, their debts
+098:             // will be paid down directly.
+099:             _reduceAccountDebt(
+100:                 vaultConfig, vaultState, vaultAccount, pr, currencyIndex, depositUnderlyingInternal, true
+101:             );
+102:             depositAmountPrimeCash = 0;
+103:         }
+104: 
+105:         // Check min borrow in this liquidation method, the deleverage calculation should adhere to the min borrow
+106:         vaultAccount.setVaultAccountForLiquidation(vaultConfig, currencyIndex, depositAmountPrimeCash, true);
+107: 
+108:         emit VaultDeleverageAccount(vault, account, currencyId, vaultSharesToLiquidator, depositAmountPrimeCash);
+109:         emit VaultLiquidatorProfit(vault, account, liquidator, vaultSharesToLiquidator, true);
+110: 
+111:         _transferVaultSharesToLiquidator(
+112:             liquidator, vaultConfig, vaultSharesToLiquidator, vaultAccount.maturity
+113:         );
+114: 
+115:         Emitter.emitVaultDeleverage(
+116:             liquidator, account, vault, currencyId, vaultState.maturity,
+117:             depositAmountPrimeCash, vaultSharesToLiquidator
+118:         );
+119:     }
+```
+
+`currencyIndex` represents which currency is being liquidated and `depositUnderlyingInternal` the amount of debt being reduced. Only one currency's debt can be updated here.
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L239-L267
+
+```solidity
+File: VaultLiquidationAction.sol
+239:     function _reduceAccountDebt(
+240:         VaultConfig memory vaultConfig,
+241:         VaultState memory vaultState,
+242:         VaultAccount memory vaultAccount,
+243:         PrimeRate memory primeRate,
+244:         uint256 currencyIndex,
+245:         int256 depositUnderlyingInternal,
+246:         bool checkMinBorrow
+247:     ) private {
+248:         if (currencyIndex == 0) {
+249:             vaultAccount.updateAccountDebt(vaultState, depositUnderlyingInternal, 0);
+250:             vaultState.setVaultState(vaultConfig);
+251:         } else {
+252:             // Only set one of the prime rates, the other prime rate is not used since
+253:             // the net debt amount is set to zero
+254:             PrimeRate[2] memory pr;
+255:             pr[currencyIndex - 1] = primeRate;
+256: 
+257:             VaultSecondaryBorrow.updateAccountSecondaryDebt(
+258:                 vaultConfig,
+259:                 vaultAccount.account,
+260:                 vaultAccount.maturity,
+261:                 currencyIndex == 1 ? depositUnderlyingInternal : 0,
+262:                 currencyIndex == 2 ? depositUnderlyingInternal : 0,
+263:                 pr,
+264:                 checkMinBorrow
+265:             );
+266:         }
+267:     }
+```
+
+In the case of vault settlement, through self-liquidation, users can setup their debt and cash holdings post-settlement, such that both `accountDebtOne` and `accountDebtTwo` are non-zero and less than `vaultConfig.minAccountSecondaryBorrow`. The objective would be to have zero primary debt and `Y` secondary debt and `X` secondary cash. Post-settlement, cash is used to offset debt (`Y - X < minAccountSecondaryBorrow`) and due to the lack of `checkMinBorrow` in `VaultAccountAction.settleVaultAccount()`, both secondary currencies can have debt holdings below the minimum amount.
+
+Now when `deleverageAccount()` is called on a prime vault account, debts are paid down directly. However, if we are only able to pay down one secondary currency at a time, `checkMinBorrow` will fail in `VaultSecondaryBorrow.updateAccountSecondaryDebt()` because both debts are checked.
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultSecondaryBorrow.sol#L295-L299
+
+```solidity
+File: VaultSecondaryBorrow.sol
+295:         if (checkMinBorrow) {
+296:             // No overflow on negation due to overflow checks above
+297:             require(accountDebtOne == 0 || vaultConfig.minAccountSecondaryBorrow[0] <= -accountDebtOne, "min borrow");
+298:             require(accountDebtTwo == 0 || vaultConfig.minAccountSecondaryBorrow[1] <= -accountDebtTwo, "min borrow");
+299:         }
+```
+
+No prime fees accrue on secondary debt, hence, this debt will never reach a point where it is above the minimum borrow amount.
+
+## Impact
+
+Malicious actors can generate vault accounts which cannot be liquidated. Through opening numerous vault positions, Notional can rack up significant exposure and accrue bad debt as a result.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L57-L119
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L239-L267
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultSecondaryBorrow.sol#L295-L299
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Either allow for multiple currencies to be liquidated or ensure that `checkMinBorrow` is performed only on the currency which is being liquidated.
+
+
+
+## Discussion
+
+**T-Woodward**
+
+True. Also I don't think you need to settle the accounts. If you call liquidateVaultCashBalance I believe min borrow checks will be skipped on all currencies, so you could just deleverage twice to get positive cash balances on each secondary currency and then liquidateVaultCashBalance on each to get both secondary currency debts below min.
+
+**0xleastwood**
+
+Escalate for 10 USDC
+
+I think this was wrongly classified as `medium` severity during the judging contest phase. I had confirmed this as a `high` severity finding with the Notional team prior to submission.
+
+Ultimately, the finding states that users can create any number of vault positions where they only have debt in each secondary currency and no primary currency. They are then able to liquidate their debt below `minAccountSecondaryBorrow` and therefore prevent any future liquidation. Repeated abuse of this could lead to protocol insolvency.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> I think this was wrongly classified as `medium` severity during the judging contest phase. I had confirmed this as a `high` severity finding with the Notional team prior to submission.
+> 
+> Ultimately, the finding states that users can create any number of vault positions where they only have debt in each secondary currency and no primary currency. They are then able to liquidate their debt below `minAccountSecondaryBorrow` and therefore prevent any future liquidation. Repeated abuse of this could lead to protocol insolvency.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Trumpero**
+
+Agree with the escalation that this issue should be a high
+
+**hrishibhat**
+
+Result:
+High
+Unique
+Considering this issue as a valid high 
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/202/#issuecomment-1567533404): accepted
+
+# Issue H-10: Partial liquidations are not possible 
+
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/204 
+
+## Found by 
+xiaoming90
+## Summary
+
+Due to an incorrect implementation of `VaultValuation.getLiquidationFactors()`, Notional requires that a liquidator reduces an account's debt below `minBorrowSize`. This does not allow liquidators to partially liquidate a vault account into a healthy position and opens up the protocol to an edge case where an account is always ineligible for liquidation. 
+
+## Vulnerability Detail
+
+While `VaultValuation.getLiquidationFactors()` might allow for the resultant outstanding debt to be below the minimum borrow amount and non-zero, `deleverageAccount()` will revert due to `checkMinBorrow` being set to `true`. Therefore, the only option is for liquidators to wipe the outstanding debt entirely but users can set up their vault accounts such that that `maxLiquidatorDepositLocal` is less than each of the vault currency's outstanding debt.
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultValuation.sol#L240-L270
+
+```solidity
+File: VaultValuation.sol
+240:         int256 maxLiquidatorDepositLocal = _calculateDeleverageAmount(
+241:             vaultConfig,
+242:             h.vaultShareValueUnderlying,
+243:             h.totalDebtOutstandingInPrimary.neg(),
+244:             h.debtOutstanding[currencyIndex].neg(),
+245:             minBorrowSize,
+246:             exchangeRate,
+247:             er.rateDecimals
+248:         );
+249: 
+250:         // NOTE: deposit amount is always positive in this method
+251:         if (depositUnderlyingInternal < maxLiquidatorDepositLocal) {
+252:             // If liquidating past the debt outstanding above the min borrow, then the entire
+253:             // debt outstanding must be liquidated.
+254: 
+255:             // (debtOutstanding - depositAmountUnderlying) is the post liquidation debt. As an
+256:             // edge condition, when debt outstanding is discounted to present value, the account
+257:             // may be liquidated to zero while their debt outstanding is still greater than the
+258:             // min borrow size (which is normally enforced in notional terms -- i.e. non present
+259:             // value). Resolving this would require additional complexity for not much gain. An
+260:             // account within 20% of the minBorrowSize in a vault that has fCash discounting enabled
+261:             // may experience a full liquidation as a result.
+262:             require(
+263:                 h.debtOutstanding[currencyIndex].sub(depositUnderlyingInternal) < minBorrowSize,
+264:                 "Must Liquidate All Debt"
+265:             );
+266:         } else {
+267:             // If the deposit amount is greater than maxLiquidatorDeposit then limit it to the max
+268:             // amount here.
+269:             depositUnderlyingInternal = maxLiquidatorDepositLocal;
+270:         }
+```
+
+If `depositUnderlyingInternal >= maxLiquidatorDepositLocal`, then the liquidator's deposit is capped to `maxLiquidatorDepositLocal`. However, `maxLiquidatorDepositLocal` may put the vault account's outstanding debt below the minimum borrow amount but not to zero. 
+
+However, because it is not possible to partially liquidate the account's debt, we reach a deadlock where it isn't possible to liquidate all outstanding debt and it also isn't possible to liquidate debt partially. So even though it may be possible to liquidate an account into a healthy position, the current implementation doesn't always allow for this to be true.
+
+## Impact
+
+Certain vault positions will never be eligible for liquidation and hence Notional may be left with bad debt. Liquidity providers will lose funds as they must cover the shortfall for undercollateralised positions.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L76-L82
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountHealth.sol#L260-L264
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultValuation.sol#L240-L270
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+`VaultValuation.getLiquidationFactors()` must be updated to allow for partial liquidations.
+
+```solidity
+File: VaultValuation.sol
+251:         if (depositUnderlyingInternal < maxLiquidatorDepositLocal) {
+252:             // If liquidating past the debt outstanding above the min borrow, then the entire
+253:             // debt outstanding must be liquidated.
+254: 
+255:             // (debtOutstanding - depositAmountUnderlying) is the post liquidation debt. As an
+256:             // edge condition, when debt outstanding is discounted to present value, the account
+257:             // may be liquidated to zero while their debt outstanding is still greater than the
+258:             // min borrow size (which is normally enforced in notional terms -- i.e. non present
+259:             // value). Resolving this would require additional complexity for not much gain. An
+260:             // account within 20% of the minBorrowSize in a vault that has fCash discounting enabled
+261:             // may experience a full liquidation as a result.
+262:             require(
+263:                 h.debtOutstanding[currencyIndex].neg().sub(depositUnderlyingInternal) >= minBorrowSize,
+                         || h.debtOutstanding[currencyIndex].neg().sub(depositUnderlyingInternal) == 0
+264:                 "Must Liquidate All Debt"
+265:             );
+266:         } else {
+267:             // If the deposit amount is greater than maxLiquidatorDeposit then limit it to the max
+268:             // amount here.
+269:             depositUnderlyingInternal = maxLiquidatorDepositLocal;
+270:         }
+```
+
+
+
+## Discussion
+
+**T-Woodward**
+
+This is true. This is an issue when a vaultAccount is borrowing from the prime maturity, but not an issue when an account is borrowing from an fCash maturity.
+
+**0xleastwood**
+
+Escalate for 10 USDC
+
+We are able to set up a vault account in a way such that liquidating an amount equal or up to `maxLiquidatorDepositLocal` will leave the resultant currency debt above `minBorrowSize` and hence the liquidation will fail. Therefore, we would be in a deadlock position where a user is unable to sufficiently liquidate a vault of considerable size and hence the vault could accrue bad debt. While this only applies to prime vaults, `high` severity is still justified here because it is not possible to liquidate a vault if these conditions are held.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> We are able to set up a vault account in a way such that liquidating an amount equal or up to `maxLiquidatorDepositLocal` will leave the resultant currency debt above `minBorrowSize` and hence the liquidation will fail. Therefore, we would be in a deadlock position where a user is unable to sufficiently liquidate a vault of considerable size and hence the vault could accrue bad debt. While this only applies to prime vaults, `high` severity is still justified here because it is not possible to liquidate a vault if these conditions are held.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Trumpero**
+
+Agree with the escalation that this should be a high issue.
+
+**hrishibhat**
+
+Result:
+High
+Unique
+Considering this a high issue based points raised in the issue and the escalation
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/204/#issuecomment-1567569448): accepted
+
+# Issue H-11: Vault accounts with excess cash can avoid being settled 
+
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/207 
+
+## Found by 
+xiaoming90
+## Summary
+
+If excess cash was transferred out from an account during account settlement, then the protocol will check the account's collateral ratio and revert if the position is unhealthy. Because it may not be possible to settle a vault account, liquidators cannot reduce account debt by purchasing vault shares because `_authenticateDeleverage()` will check to see if a vault has matured.
+
+## Vulnerability Detail
+
+Considering an account's health is determined by a combination of its outstanding debt, cash holdings and the total underlying value of its vault shares, transferring out excess cash may actually put an account in an unhealthy position. 
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountAction.sol#L41-L68
+
+```solidity
+File: VaultAccountAction.sol
+41:     function settleVaultAccount(address account, address vault) external override nonReentrant {
+42:         requireValidAccount(account);
+43:         require(account != vault);
+44: 
+45:         VaultConfig memory vaultConfig = VaultConfiguration.getVaultConfigStateful(vault);
+46:         VaultAccount memory vaultAccount = VaultAccountLib.getVaultAccount(account, vaultConfig);
+47:         
+48:         // Require that the account settled, otherwise we may leave the account in an unintended
+49:         // state in this method because we allow it to skip the min borrow check in the next line.
+50:         (bool didSettle, bool didTransfer) = vaultAccount.settleVaultAccount(vaultConfig);
+51:         require(didSettle, "No Settle");
+52: 
+53:         vaultAccount.accruePrimeCashFeesToDebt(vaultConfig);
+54: 
+55:         // Skip Min Borrow Check so that accounts can always be settled
+56:         vaultAccount.setVaultAccount({vaultConfig: vaultConfig, checkMinBorrow: false});
+57: 
+58:         if (didTransfer) {
+59:             // If the vault did a transfer (i.e. withdrew cash) we have to check their collateral ratio. There
+60:             // is an edge condition where a vault with secondary borrows has an emergency exit. During that process
+61:             // an account will be left some cash balance in both currencies. It may have excess cash in one and
+62:             // insufficient cash in the other. A withdraw of the excess in one side will cause the vault account to
+63:             // be insolvent if we do not run this check. If this scenario indeed does occur, the vault itself must
+64:             // be upgraded in order to facilitate orderly exits for all of the accounts since they will be prevented
+65:             // from settling.
+66:             IVaultAccountHealth(address(this)).checkVaultAccountCollateralRatio(vault, account);
+67:         }
+68:     }
+```
+
+It is important to note that all vault liquidation actions require a vault to first be settled. Hence, through self-liquidation, sophisticated vault accounts can have excess cash in one currency and significant debt holdings in the vault's other currencies. 
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L197-L237
+
+```solidity
+File: VaultLiquidationAction.sol
+197:     function _authenticateDeleverage(
+198:         address account,
+199:         address vault,
+200:         address liquidator
+201:     ) private returns (
+202:         VaultConfig memory vaultConfig,
+203:         VaultAccount memory vaultAccount,
+204:         VaultState memory vaultState
+205:     ) {
+206:         // Do not allow invalid accounts to liquidate
+207:         requireValidAccount(liquidator);
+208:         require(liquidator != vault);
+209: 
+210:         // Cannot liquidate self, if a vault needs to deleverage itself as a whole it has other methods 
+211:         // in VaultAction to do so.
+212:         require(account != msg.sender);
+213:         require(account != liquidator);
+214: 
+215:         vaultConfig = VaultConfiguration.getVaultConfigStateful(vault);
+216:         require(vaultConfig.getFlag(VaultConfiguration.DISABLE_DELEVERAGE) == false);
+217: 
+218:         // Authorization rules for deleveraging
+219:         if (vaultConfig.getFlag(VaultConfiguration.ONLY_VAULT_DELEVERAGE)) {
+220:             require(msg.sender == vault);
+221:         } else {
+222:             require(msg.sender == liquidator);
+223:         }
+224: 
+225:         vaultAccount = VaultAccountLib.getVaultAccount(account, vaultConfig);
+226: 
+227:         // Vault accounts that are not settled must be settled first by calling settleVaultAccount
+228:         // before liquidation. settleVaultAccount is not permissioned so anyone may settle the account.
+229:         require(block.timestamp < vaultAccount.maturity, "Must Settle");
+230: 
+231:         if (vaultAccount.maturity == Constants.PRIME_CASH_VAULT_MATURITY) {
+232:             // Returns the updated prime vault state
+233:             vaultState = vaultAccount.accruePrimeCashFeesToDebtInLiquidation(vaultConfig);
+234:         } else {
+235:             vaultState = VaultStateLib.getVaultState(vaultConfig, vaultAccount.maturity);
+236:         }
+237:     }
+```
+
+Consider the following example:
+
+Alice has a valid borrow position in the vault which is considered risky. She has a small bit of secondary cash but most of her debt is primary currency denominated. Generally speaking her vault is healthy. Upon settlement, the small bit of excess secondary cash is transferred out and her vault is undercollateralised and eligible for liquidation. However, we are deadlocked because it is not possible to settle the vault because `checkVaultAccountCollateralRatio()` will fail, and it's not possible to purchase the excess cash and offset the debt directly via `liquidateVaultCashBalance()` or `deleverageAccount()` because `_authenticateDeleverage()` will revert if a vault has not yet been settled.
+
+## Impact
+
+Vault accounts can create positions which will never be eligible for liquidation and the protocol may accrue bad debt.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountAction.sol#L41-L68
+
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L197-L237
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Consider adding a liquidation method which settles a vault account and allows for a liquidator to purchase vault shares, offsetting outstanding debt, before performing collateral ratio checks.
+
+
+
+## Discussion
+
+**T-Woodward**
+
+We're changing settlement to just leave excess cash in the account's cash balance and not transfer out. This allows us to drop the collateral check and remove this issue.
+
+**0xleastwood**
+
+Escalate for 10 USDC
+
+This issue identifies a deadlock situation where it is not possible to liquidate a vault unless it has first been settled. But it is also not possible to purchase vault cash and offset debt. Hence, a vault can be considered healthy prior to settlement, but because some excess cash is transferred out and the protocol performs collateral checks via `checkVaultAccountCollateralRatio()`, vault settlement may fail.
+
+I believe the severity of this situation to also be `high` risk because sophisticated users are able to avoid liquidation.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> This issue identifies a deadlock situation where it is not possible to liquidate a vault unless it has first been settled. But it is also not possible to purchase vault cash and offset debt. Hence, a vault can be considered healthy prior to settlement, but because some excess cash is transferred out and the protocol performs collateral checks via `checkVaultAccountCollateralRatio()`, vault settlement may fail.
+> 
+> I believe the severity of this situation to also be `high` risk because sophisticated users are able to avoid liquidation.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Trumpero**
+
+Agree with the escalation, this issue should be a high.
+
+**hrishibhat**
+
+Result:
+High
+Unique
+Considering this issue as a valid high based on the escalation that certain users can avoid liquidations
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/207/#issuecomment-1567536805): accepted
+
+# Issue M-1: Lack of ERC20 approval on depositing to external money markets Compound V2 
+
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/28 
+
+## Found by 
+ShadowForce, mstpr-brainbot
+## Summary
+Notional's current rebalancing process for depositing prime cash underlyings into Compound V2 generates the mint function without approval.
+## Vulnerability Detail
+Governance rebalances the prime cash underlyings by depositing them into various external money market platforms. Currently, Notional only supports Compound V2, for which an oracle and rebalancing strategy have been developed. When Compound V2 deposit call data is generated in the oracle, it only generates the cTokens' mint function without approval. However, it should first approve and then call the mint, as cToken takes the underlying from the Notional proxy and mints the cToken to the Notional proxy.
+
+Upon careful examination of the v2 code, this finding passes tests because the old Notional V2 proxy already has approval for some Compound V2 cTokens. Since the Notional V2 code is not in scope for this contest and the approval situation is not mentioned in the protocol documentation, this finding should be considered valid. Furthermore, if the protocol wants to launch new cTokens for which V2 does not already have approval, the process will fail due to the lack of approval.
+## Impact
+This finding should be considered valid for several reasons:
+
+The issue is not mentioned in the documentation provided by the protocol team. It is crucial for the documentation to be comprehensive, as it serves as a guide for developers and users to understand the intricacies of the protocol.
+The Notional V2 code is out of scope for the contest. Therefore, the fact that the old Notional V2 proxy already has approval for some Compound V2 cTokens should not be considered a mitigating factor, as the focus should be on the current implementation and its potential issues.
+Most importantly, this issue could impact the functionality of Notional when attempting to launch new cTokens for Compound V2 that do not already have an allowance in the proxy. The lack of approval would cause the process to fail, effectively limiting the growth and adaptability of the protocol.
+In summary, this finding is valid due to its absence in the provided documentation, its relevance to the current implementation rather than the out-of-scope Notional V2 code, and its potential to limit the protocol's functionality when dealing with new cTokens for Compound V2. I'll call it as medium severity after all considerations.
+
+It is important to note that this finding may not be applicable to non-implemented protocol oracles such as AAVE-Euler. In these cases, there is a possibility to create multiple call data deposits, allowing for a more flexible approach. Governance can first generate one call data to approve the required allowances and then generate a subsequent call data to initiate the deposit process.
+## Code Snippet
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/external/pCash/adapters/CompoundV2AssetAdapter.sol#L45-L48
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+put a check on allowance before deposit something like this:
+
+```solidity
+if (IERC20.allowance(address(NotionalProxy), address(cToken))) {
+      callData[0] = abi.encodeWithSelector(
+        IERC20.approve.selector,
+        address(NotionalProxy),
+        address(cToken)
+      );
+    }
+``` 
+
+
+
+## Discussion
+
+**jeffywu**
+
+Compound V2 will not be used for rebalancing, however, even if that were not the case this issue would be invalid. Notional currently already has an approval with all listed cTokens and that would still stand after the migration.
+
+**mstpr**
+
+Escalate for 10 USDC
+
+Current code scope is only covering CompoundV2 and there are rebalancing, deposit and redeeming functions already coded up. It is certain that this code scope is intended to work with only CompoundV2 since it has full functionality. Protocol team states that CompoundV2 will not be used for rebalancing but there are functions for it and there are not alternative money markets built in aswell so one can easily say that there is only CompoundV2 to interact with prime cash at the current scope. 
+
+Approvals from NotionalV2 handles the lack of approval here however, as stated in the contest here:
+<img width="588" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-judging/assets/120012681/ed1ece0e-b88a-44c9-9298-efedebb1ae7a">
+USDT can be used in NotionalV3 which was not existed in NotionalV2 hence, there are no approvals. If USDT would be integrated to the NotionalV3 current code would fail since there is no approval for USDT from NotionalV3 to CompoundV2.
+
+If CompoundV2 will not be used for rebalancing, then why there are rebalancing functions for only CompoundV2 and not others? I think protocol team should've stated that.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> Current code scope is only covering CompoundV2 and there are rebalancing, deposit and redeeming functions already coded up. It is certain that this code scope is intended to work with only CompoundV2 since it has full functionality. Protocol team states that CompoundV2 will not be used for rebalancing but there are functions for it and there are not alternative money markets built in aswell so one can easily say that there is only CompoundV2 to interact with prime cash at the current scope. 
+> 
+> Approvals from NotionalV2 handles the lack of approval here however, as stated in the contest here:
+> <img width="588" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-judging/assets/120012681/ed1ece0e-b88a-44c9-9298-efedebb1ae7a">
+> USDT can be used in NotionalV3 which was not existed in NotionalV2 hence, there are no approvals. If USDT would be integrated to the NotionalV3 current code would fail since there is no approval for USDT from NotionalV3 to CompoundV2.
+> 
+> If CompoundV2 will not be used for rebalancing, then why there are rebalancing functions for only CompoundV2 and not others? I think protocol team should've stated that.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Jiaren-tang**
+
+Escalate for 10 USDC. I agree with mstpr that this issue should be a valid issue
+
+adding any token or external market would break the rebalance flow because of lack of token approval 
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC. I agree with mstpr that this issue should be a valid issue
+> 
+> adding any token or external market would break the rebalance flow because of lack of token approval 
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Result:
+Medium
+Has duplicates
+Considering this issue as a valid medium based on the information provided in the readme makes this issue possible when the additional token is added.
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [mstpr](https://github.com/sherlock-audit/2023-03-notional-judging/issues/28/#issuecomment-1568143583): accepted
+- [ShadowForce](https://github.com/sherlock-audit/2023-03-notional-judging/issues/28/#issuecomment-1570483665): accepted
+
+# Issue M-2: Fee on transfer tokens will break the withdrawing process 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/34 
 
@@ -918,7 +1632,63 @@ Instead of promising the underlying amount on withdrawals, just return the withd
 
 This is somewhat true, although if this really happened and we needed to manage it the PrimeCashHoldingsOracle could return a lower external balance to account for the transfer fee.
 
-# Issue M-2: convertFromStorage() fails to use rounding-up when converting a negative storedCashBalance into signedPrimeSupplyValue. 
+**Jiaren-tang**
+
+Escalate for 10 USDC. fee on transfer is not in scope and this issue should not be a seperate medium
+
+the onchain context is:
+
+> DEPLOYMENT: Currently Mainnet, considering Arbitrum and Optimisim in the near future.
+> ERC20:  Any Non-Rebasing token. ex. USDC, DAI, USDT (future), wstETH, WETH, WBTC, FRAX, CRV, etc.
+> ERC721: None
+> ERC777: None
+> FEE-ON-TRANSFER: None planned, some support for fee on transfer
+
+clearly none of the supported ERC20 token is fee-on-transfer token
+
+and the protocol clearly indicate 
+
+> FEE-ON-TRANSFER: None planned, some support for fee on transfer
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC. fee on transfer is not in scope and this issue should not be a seperate medium
+> 
+> the onchain context is:
+> 
+> > DEPLOYMENT: Currently Mainnet, considering Arbitrum and Optimisim in the near future.
+> > ERC20:  Any Non-Rebasing token. ex. USDC, DAI, USDT (future), wstETH, WETH, WBTC, FRAX, CRV, etc.
+> > ERC721: None
+> > ERC777: None
+> > FEE-ON-TRANSFER: None planned, some support for fee on transfer
+> 
+> clearly none of the supported ERC20 token is fee-on-transfer token
+> 
+> and the protocol clearly indicate 
+> 
+> > FEE-ON-TRANSFER: None planned, some support for fee on transfer
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+Considering this a valid issue as the readme indicates support of Fee-on-Transfer token is intended. 
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [ShadowForce](https://github.com/sherlock-audit/2023-03-notional-judging/issues/34/#issuecomment-1570509437): rejected
+
+# Issue M-3: convertFromStorage() fails to use rounding-up when converting a negative storedCashBalance into signedPrimeSupplyValue. 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/70 
 
@@ -991,7 +1761,157 @@ function convertFromStorage(
 ```
 
 
-# Issue M-3: Cannot permissionless settle the vault account if the user use a blacklisted account 
+# Issue M-4: Compound exchange rate can be manipulated to withdraw more underlying tokens from NotionalV3 
+
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/122 
+
+## Found by 
+mstpr-brainbot
+## Summary
+Prime cash underlying values can be manipulated via donating the underlying to cToken contract to inflate the cToken price and then withdrawing from Notional for more.
+## Vulnerability Detail
+Prime supply underlying value is calculated via few formulas and math operations let's check them:
+
+To calculate the underlying interest rate:
+(currentUnderlyingValue - lastUnderlyingValue) / lastUnderlyingValue
+which we can say that underlying value can be in forms of DAI or cDAI (since the other protocol handlers are not in the audit scope I'll treat it as there is only CompoundV2 available for prime cash external lenders)
+We can derive this formula for more context:
+(((exchangeRate * totalCDAIHoldings) + totalDAIHolds) - ((previousExchangeRate * totalCDAIHoldings) + totalDAIHolds)) / ((previousExchangeRate * totalCDAIHoldings) + totalDAIHolds) = underlyingInterestRate
+
+To calculate the underlying scalar:
+lastScalar * (1 + underlyingInterestRate) = underlyingScalar
+
+To calculate the supply factor:
+supplyScalar * underlyingScalar = supplyFactor
+
+To calculate the underlying final:
+primeCashValue * supplyFactor = underlyingFinal
+
+now considering these, if someone can manipulate the currentUnderlying (total underlying tokens that Notional holds) up to some level that they can make the prime cash value higher, than there will be a profit. Currently, NotionalV3 deposits the funds to CompoundV2 which the exchange rate is calculated as follows:
+
+(totalCash + totalBorrows - totalReserves) / totalCDAISupply
+
+where as totalCash is the balanceOf(token) in the cToken contract. This means that the donations can manipulate the exchange rate and make Notional V3 underlying oracle trick that the tokens worths more. That means the exchange rate can be calculated as this:
+
+(airDropAmount + totalCash + totalBorrows - totalReserves) / totalCDAISupply
+
+if we can find a scenario where underlyingFinal > airDropAmount + initialPrimeCash, someone can do a flash loan attack
+
+
+Let's draw a scenario where this can happen ,
+Assume cDAI has very low liquidity because Compound incentives the v3 usage, Notional is withdrawing its CompoundV2 positions slowly to DAI and getting ready to deploy them to CompoundV3. For this scenario case assume there are total of 100K cDAI which all of them hold by Notional (this can change, just for simplicity I am keeping it), now if attacker donates 50K DAI to cDAI attacker will make the new exchange rate 1.5. Here we go:
+
+1- There are 220K DAI idle and 100K cDAI in Notional (for easiness let's assume 1cDAI == 1DAI)
+2- Alice flashloans 4.83M DAI and deposits to Notional receiving 4.83M pDAI (we assume supplyFactor is 1, which is possible if we are early stages after migration, no interest accrued). Alice will make the total idle DAI balance in Notional as 5M after her deposit
+3- Alice deposits the 50K DAI to cDAI contract to make the exchange rate 1.5 (100KDAI/100KCDAI was the initial state of cDAI, now 150K DAI / 100K CDAI = 1.5) 
+4- Alice withdraws the 4.83M pDAI for 5M DAI
+
+Let's prove the math,
+lastUnderlying = (100K cDAI * 1 + 5M) = 5.1M
+
+currentUnderlying = (100K cDAI * 1.5 + 5M) = 5.150M
+
+underlyingInterestRate = (5.15M - 5.1M) / 5.1M = 0.045
+
+underlyingScalar = 1 * (0.045+ 1) = 1.045
+
+supplyScalar = 1 * 1.045 = 1.045
+
+Result:
+Alice deposited 4.78M DAI which she got 4.78M pDAI for it, now 4.78M pDAI worths 4.78M * 1.045 =  5M DAI (approx) 
+
+Alice flashloaned 4.78M + 50K = 4.83M total flash loaned amount
+
+5M - 4.83M = 170K DAI profit after her attack
+
+In the end, Alice stole the 220K idle balance.
+
+
+## Impact
+Although the above example considers the compound cDAI has very low liquidity, the same scenario could happen with big numbers but that would require Notional to hold lots of liquidity. Since compound is literally incentivizing the compoundv3 over compoundv2 I assumed that scenario is not far away from reality. We also assumed supplyScalar was 1, which is possible since the prime market will start as 1 but also it doesn't really matter since we multiply with lastScalar and supplyScalar on both sides of equation, again it was 1 for simplicity. 
+
+## Code Snippet
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/external/actions/AccountAction.sol#L173-L210
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/balances/BalanceHandler.sol#L525
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/pCash/PrimeCashExchangeRate.sol#L618-L641
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/pCash/PrimeCashExchangeRate.sol#L535-L596
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/balances/BalanceHandler.sol#L143-L160
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/balances/TokenHandler.sol#L231-L234
+
+https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/pCash/PrimeRateLib.sol#L301-L306
+
+Compound stuff
+<img width="703" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-mstpr/assets/120012681/12d241fb-4ca7-48fa-babb-1fdf6a3bf6ed">
+
+<img width="617" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-mstpr/assets/120012681/43641c5d-fc07-4466-b866-09be5abce620">
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+Acknowledge that CompoundV2 exchange rate is exploitable via donating, if the CompoundV2 cTokens has low liquidity, donate attacks will be quite cheap which can cause pDAI manipulations aswell. If the CompoundV2 cToken liquidity goes below some level abort the CompoundV2 strategy and migrate to other money markets where liquidity is decent and exchange rate is not manipulatable. 
+
+
+
+## Discussion
+
+**jeffywu**
+
+This attack vector is known and mitigations have been put in place against it (we've already withdrawn from Compound V2). Furthermore, we've only listed large cap Compound V2 markets so this attack would be very expensive against prime cash.
+
+**mstpr**
+
+Escalate for 10 USDC
+
+At the moment, the contest only includes the CompoundV2 adapter. From this, we could infer that the primary cash will be deposited into CompoundV2. In the future, CompoundV3 and Aave may also be integrated. However, within the current scope of the code, it only operates with CompoundV2. Consequently, we can safely assert that prime cash will be lent to CompoundV2. This is evident from the scope of the code, which includes all the necessary implementations such as rebalancing, redeeming, and depositing.
+
+While I concur that the attack necessitates low liquidity in the CompoundV2 markets and that it's challenging to implement on-chain countermeasures, I believe this risk should be outlined by the protocol team in their documentation. Looking at the Sherlock docs, it's clear that the protocol team should account for possible attack vectors.
+
+<img width="786" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-judging/assets/120012681/fe73f089-cc86-4b50-91cf-25455e62e2e8">
+
+Which is exactly what this issue fits, the attack exists and protocol team did not include the attack in the docs. According to this, this finding should be a medium
+
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> At the moment, the contest only includes the CompoundV2 adapter. From this, we could infer that the primary cash will be deposited into CompoundV2. In the future, CompoundV3 and Aave may also be integrated. However, within the current scope of the code, it only operates with CompoundV2. Consequently, we can safely assert that prime cash will be lent to CompoundV2. This is evident from the scope of the code, which includes all the necessary implementations such as rebalancing, redeeming, and depositing.
+> 
+> While I concur that the attack necessitates low liquidity in the CompoundV2 markets and that it's challenging to implement on-chain countermeasures, I believe this risk should be outlined by the protocol team in their documentation. Looking at the Sherlock docs, it's clear that the protocol team should account for possible attack vectors.
+> 
+> <img width="786" alt="image" src="https://github.com/sherlock-audit/2023-03-notional-judging/assets/120012681/fe73f089-cc86-4b50-91cf-25455e62e2e8">
+> 
+> Which is exactly what this issue fits, the attack exists and protocol team did not include the attack in the docs. According to this, this finding should be a medium
+> 
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+Considering this issue as a valid medium, based on the conditions required and given that the Compound v2 integration was still in scope for the contest. 
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [mstpr](https://github.com/sherlock-audit/2023-03-notional-judging/issues/122/#issuecomment-1568132606): accepted
+
+# Issue M-5: Cannot permissionless settle the vault account if the user use a blacklisted account 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/155 
 
@@ -1252,7 +2172,7 @@ maybe let admin bypass the withdrawPrimeCash and force settle the account to not
 
 Valid issue, transfers during supposedly permissionless settlement can indeed cause issues.
 
-# Issue M-4: getAccountPrimeDebtBalance() always return 0 
+# Issue M-6: getAccountPrimeDebtBalance() always return 0 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/173 
 
@@ -1310,7 +2230,7 @@ Manual Review
     }
 ```
 
-# Issue M-5: A single external protocol can DOS rebalancing process 
+# Issue M-7: A single external protocol can DOS rebalancing process 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/175 
 
@@ -1416,7 +2336,7 @@ Manual Review
 
 Consider implementing a more resilient rebalancing process that allows for failures in individual external money markets. For instance, Notional could catch reverts from individual money markets and continue the rebalancing process with the remaining markets. 
 
-# Issue M-6: Inadequate slippage control 
+# Issue M-8: Inadequate slippage control 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/177 
 
@@ -1562,7 +2482,7 @@ Manual Review
 
 Consider updating the slippage control to compare the user's acceptable interest rate limit (`rateLimit`) against the interest rate used during the trade execution (`postFeeInterestRate`).
 
-# Issue M-7: Inconsistent use of `VAULT_ACCOUNT_MIN_TIME` in vault implementation 
+# Issue M-9: Inconsistent use of `VAULT_ACCOUNT_MIN_TIME` in vault implementation 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/179 
 
@@ -1611,66 +2531,17 @@ Manual Review
 
 It might be worth adding an exception to `VaultConfiguration.settleAccountOrAccruePrimeCashFees()` so that when vault fees are calculated, `lastUpdatedBlockTime` is not updated to `block.timestamp`.
 
-# Issue M-8: Vault secondary currencies can be fee-on-transfer tokens 
 
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/180 
 
-## Found by 
-xiaoming90
-## Summary
+## Discussion
 
-When creating or configuring a vault, the vault does not check that the secondary currencies are not fee-on-transfer tokens.
+**jeffywu**
 
-## Vulnerability Detail
+Given how storage is structured, if we do not set lastUpdatedBlockTime then the prime vault account will end up paying fees on the same time portion twice. This is probably worse than not being able to exit the position twice in succession.
 
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultConfiguration.sol#L197
+Although this issue is correct, the exit time is 1 minute. Will mark this as Won't Fix as the change will probably more complex than the benefit to UX.
 
-```solidity
-File: VaultConfiguration.sol
-194:         // Tokens with transfer fees create lots of issues with vault mechanics, we prevent them
-195:         // from being listed here.
-196:         Token memory underlyingToken = TokenHandler.getUnderlyingToken(vaultConfig.borrowCurrencyId);
-197:         require(!underlyingToken.hasTransferFee); 
-```
-
-Tokens with transfer fees create lots of issues with vault mechanics. When creating or configuring a vault, Notional explicitly performs validation against the primary currency to ensure that its underlying token does not have a transfer fee at Line 197 above.
-
-However, a vault does not only supports the primary currency. It also supports one or more secondary currencies. When configuring the vault, it should also check that the underlying token of secondary currencies does not have a transfer fee.
-
-## Impact
-
-Tokens with transfer fees create lots of issues with vault mechanics. If a fee-on-transfer token is added as the secondary currency on a vault, the vault might not work or might cause accounting issues within the vault.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultConfiguration.sol#L197
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Consider checking that the underlying token of secondary currencies does not have a transfer fee.
-
-```diff
-// Tokens with transfer fees create lots of issues with vault mechanics, we prevent them
-// from being listed here.
-Token memory underlyingToken = TokenHandler.getUnderlyingToken(vaultConfig.borrowCurrencyId);
-require(!underlyingToken.hasTransferFee); 
-
-+ if (vaultConfig.secondaryBorrowCurrencies[0] != 0) {
-+	Token memory secondaryUnderlyingTokenOne = TokenHandler.getUnderlyingToken(vaultConfig.secondaryBorrowCurrencies[0]);
-+	require(!secondaryUnderlyingTokenOne.hasTransferFee); 
-+ }
-
-+ if (vaultConfig.secondaryBorrowCurrencies[1] != 0) {
-+	Token memory secondaryUnderlyingTokenTwo = TokenHandler.getUnderlyingToken(vaultConfig.secondaryBorrowCurrencies[1]);
-+	require(!secondaryUnderlyingTokenTwo.hasTransferFee); 
-+ }
-```
-
-# Issue M-9: Return data from the external call not verified during deposit and redemption 
+# Issue M-10: Return data from the external call not verified during deposit and redemption 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/181 
 
@@ -1753,86 +2624,74 @@ I believe that this issue should be medium or low as suggested by the auditor.
 
 I agree that the severity of this issue should be lower. Labeled it as a medium.
 
-# Issue M-10: Sequencer offline potentially leaving bad debt or account unfairly liquidated 
+# Issue M-11: Treasury rebalance will fail due to interest accrual 
 
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/182 
+Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/189 
 
 ## Found by 
 xiaoming90
 ## Summary
 
-If the sequencer goes offline, it might be possible that accounts would be undercollateralized leaving bad debt to the protocol or accounts would be unfairly liquidated.
+If Compound has updated their interest rate model, then Notional will calculate the before total underlying token balance without accruing interest. If this exceeds `Constants.REBALANCING_UNDERLYING_DELTA`, then rebalance execution will revert.
 
 ## Vulnerability Detail
 
-When a sequencer goes offline, users can still continue to "interact" with the protocol by submitting a transaction for L2 directly through Arbitrum's delayed inbox on Ethereum. Note these transactions in Arbitrum's delay inbox will not be executed yet until the sequencer comes online later. 
+The `TreasuryAction._executeRebalance()` function will revert on a specific edge case where `oracle.getTotalUnderlyingValueStateful()` does not accrue interest before calculating the value of the treasury's `cToken` holdings.
 
-Once the sequencer returns online, all transactions of the delayed inbox are executed before any others. In other words, the sequencer processes all transactions from the delayed inbox before it accepts new transactions.
-
-Due to time constraints and the limited resources available regarding the implementation of the Chainlink protocol, it is unsure how Chainlink would deal with price updates to L2's price aggregator contract when the sequencer is offline. The following are two possible actions:
-
-- Scenario 1 - Continue submitting the price update, but it should be rejected or dropped until the sequencer come online again; OR
-
-- Scenario 2 - Submit the price update via Arbitrum's delay inbox (Unlikely)
-
-Regardless of the actual action Chainlink took, there will be some form of the issue anyway. Let's consider both scenarios for completeness.
-
-**Scenario 1**
-
-Assume the first scenario and XYZ token is a collateral accepted by Notional. 
-
-1) Before the sequencer went down, the price of XYZ token was worth 100 USD. Bob holds some collateral denominated in XYZ in his Notional account. Bob holds 3 XYZ tokens. Thus, the value of his collateral value is 300 USD (ignoring any sort of haircut for simplicity).
-2) When the sequencer went down, the market price of XYZ tokens dropped significantly to 1 USD.
-3) At this point, note that the price of the XYZ token on Arbitrum is still 100 USD because no price update can be performed since the sequencer is down.
-4) Bob knows that the collateral value of his Notional account on Arbitrum would surely become worthless (3 USD) when the price update propagates to Arbitrum (L2) once the sequencer goes online. He decided to "front-run" the price update by sending a transaction to Arbitum's delay inbox to borrow as many assets as possible and forward them to his wallet address while the value of his collateral was still worth 300 USD.
-5) When the sequencer goes online, it will first take Bob's transactions from the delay inbox and execute them on L2. Note that TXs in delay inbox are executed before any others.
-6) After some time, the Chainlink price update TX gets executed by the sequencer, and the collateral value of Bob's Notional account will be updated to 3 USD. However, Bob has already borrowed around 300 USD worth of assets from Notional. Thus, making his account seriously undercollateralized, leaving bad debt to the protocol.
-
-**Scenario 2**
-
-Assume the second scenario and XYZ token is a collateral accepted by Notional.
-
-1) Before the sequencer went down, the price of XYZ token was worth 100 USD.
-2) When the sequencer went down, the market price of XYZ tokens dropped significantly to 1 USD. Assume that the price update is sent to Arbitrum's delay inbox directly.
-3) The liquidators (with their bots) notice that there will be a mass liquidation on many of the Notional accounts collateralized by XYZ in Arbitrum (L2). They take advantage of the situation and submit the liquidation transactions directly to the Arbitum's delay inbox.
-4) In theory, some borrowers can still avoid liquidation by closing their position through this delayed inbox (if they are faster than liquidation bots). However, it is unlikely that normal borrowers would have the required knowledge to do so or have a faster reaction than bots.
-5) Once the sequencer goes online, all the Notional accounts collateralized by XYZ token instantly get liquidated when the liquidator's transactions in the delay inbox get executed on L2.
-6) Before the borrowers have any chance to "top-up" or re-collateralize their accounts, their accounts have been liquidated and their collaterals sold off at below-market value.
-
-If the sequencer is offline for a long period and Bob's transactions are in the delayed inbox for a sufficient amount of time (around 24 hours), he could perform a [Force Inclusion](https://developer.arbitrum.io/sequencer#unhappyuncommon-case-sequencer-isnt-doing-its-job) to move them from the delayed inbox into the core inbox, at which point it’s finalized. In this case, he does not have to wait for the sequencer to be back online for his transactions to be executed on L2.
-
-https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/external/adapters/ChainlinkAdapter.sol#L45
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/TreasuryAction.sol#L284-L302
 
 ```solidity
-File: ChainlinkAdapter.sol
-38:         int256 baseToUSD;
-39:         (
-40:             roundId,
-41:             baseToUSD,
-42:             startedAt,
-43:             updatedAt,
-44:             answeredInRound
-45:         ) = baseToUSDOracle.latestRoundData();
-46:         require(baseToUSD > 0, "Chainlink Rate Error");
-47:         (
-48:             /* roundId */,
-49:             int256 quoteToUSD,
-50:             /* uint256 startedAt */,
-51:             /* updatedAt */,
-52:             /* answeredInRound */
-53:         ) = quoteToUSDOracle.latestRoundData();
-54:         require(quoteToUSD > 0, "Chainlink Rate Error");
+File: TreasuryAction.sol
+284:     function _executeRebalance(uint16 currencyId) private {
+285:         IPrimeCashHoldingsOracle oracle = PrimeCashExchangeRate.getPrimeCashHoldingsOracle(currencyId);
+286:         uint8[] memory rebalancingTargets = _getRebalancingTargets(currencyId, oracle.holdings());
+287:         (RebalancingData memory data) = REBALANCING_STRATEGY.calculateRebalance(oracle, rebalancingTargets);
+288: 
+289:         (/* */, uint256 totalUnderlyingValueBefore) = oracle.getTotalUnderlyingValueStateful();
+290: 
+291:         // Process redemptions first
+292:         Token memory underlyingToken = TokenHandler.getUnderlyingToken(currencyId);
+293:         TokenHandler.executeMoneyMarketRedemptions(underlyingToken, data.redeemData);
+294: 
+295:         // Process deposits
+296:         _executeDeposits(underlyingToken, data.depositData);
+297: 
+298:         (/* */, uint256 totalUnderlyingValueAfter) = oracle.getTotalUnderlyingValueStateful();
+299: 
+300:         int256 underlyingDelta = totalUnderlyingValueBefore.toInt().sub(totalUnderlyingValueAfter.toInt());
+301:         require(underlyingDelta.abs() < Constants.REBALANCING_UNDERLYING_DELTA);
+302:     }
 ```
+
+`cTokenAggregator.getExchangeRateView()` returns the exchange rate which is used to calculate the underlying value of `cToken` holdings in two ways:
+ - If the interest rate model is unchanged, then we correctly accrue interest by calculating it without mutating state.
+ - If the interest rate model HAS changed, then we query `cToken.exchangeRateStored()` which DOES NOT accrue interest.
+
+```solidity
+File: cTokenAggregator.sol
+092:     function getExchangeRateView() external view override returns (int256) {
+093:         // Return stored exchange rate if interest rate model is updated.
+094:         // This prevents the function from returning incorrect exchange rates
+095:         uint256 exchangeRate = cToken.interestRateModel() == INTEREST_RATE_MODEL
+096:             ? _viewExchangeRate()
+097:             : cToken.exchangeRateStored();
+098:         _checkExchangeRate(exchangeRate);
+099: 
+100:         return int256(exchangeRate);
+101:     }
+```
+
+Therefore, if the interest rate model has changed, `totalUnderlyingValueBefore` will not include any accrued interest and `totalUnderlyingValueAfter` will include all accrued interest. As a result, it is likely that the delta between these two amounts will exceed `Constants.REBALANCING_UNDERLYING_DELTA`, causing the rebalance to ultimately revert.
+
+It does not really make sense to not accrue interest if the interest rate model has changed unless we want to avoid any drastic changes to Notional's underlying protocol. Then we may want to explicitly revert here instead of allowing the rebalance function to still execute.
 
 ## Impact
 
-Scenario 1 - Accounts would be undercollateralized, leaving bad debt to the protocol
-
-Scenario 2 - Accounts would have been unfairly liquidated and their collaterals sold off at below-market value before the borrowers have any chance to "top-up" or re-collateralize their accounts
+The treasury manager is unable to rebalance currencies across protocols and therefore it is likely that most funds become under-utilised as a result.
 
 ## Code Snippet
 
-https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/external/adapters/ChainlinkAdapter.sol#L45
+https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/TreasuryAction.sol#L284-L302
 
 ## Tool used
 
@@ -1840,138 +2699,55 @@ Manual Review
 
 ## Recommendation
 
-This is a well-known operational issue for protocol running on L2. It is recommended to implement some measures (e.g., a grace period) to mitigate such a risk when the sequencer is offline.
-
-Chainlink has the L2 Sequencer Uptime Feeds (https://docs.chain.link/data-feeds/l2-sequencer-feeds) to allow protocols running on L2 to check sequencer availability and manage the risk.
-
-AAVE V3 ([Aave’s Price Sentinel Contract](https://github.com/aave/aave-v3-core/blob/master/contracts/protocol/configuration/PriceOracleSentinel.sol)) manages this risk by introducing a grace period that disallows liquidation and borrowing after the sequencer goes online for a period of time. Refer to AAVE V3's technical whitepaper for more details (https://github.com/aave/aave-v3-core/blob/master/techpaper/Aave_V3_Technical_Paper.pdf).
-
-# Issue M-11: Prime vaults do not consider secondary debt when assessing vault fees 
-
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/186 
-
-## Found by 
-xiaoming90
-## Summary
-
-Prime vaults do not have a maturity and are therefore charged fees on a pro-rata basis. However, when prime fees are assessed, only primary debt is taken into consideration and hence vaults much make use of multiple currencies will charge vault accounts according to the composition of their debt. Furthermore, it's important to note that vault account liquidations allow for debt compositions to change depending on what currencies are liquidated.
-
-## Vulnerability Detail
-
-Vault fees are assessed in _two_ different ways:
- - Assessed based on the length of time funds are borrowed. This scales linearly based on the maturity date and is only applicable to non-prime vault positions.
- - Prime vaults calculate fees at a fixed yearly rate and accrue these fees in key parts of the codebase.
-
-As the vault implementation has been modified to accommodate secondary borrow currencies, it doesn't seem fair that fee assessment would be applied to vault users differently. It's incorrect to assume that all users hold the same proportion of debt in each borrowed currency. 
-
-Users can also self-liquidate their primary debt to zero and avoid paying vault fees altogether.
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L475-L480
-
-```solidity
-File: VaultAccount.sol
-405:     function settleVaultAccount(
-406:         VaultAccount memory vaultAccount,
-407:         VaultConfig memory vaultConfig
-408:     ) internal returns (bool didSettle, bool didTransfer) {
-             ...
-468: 
-469:         // Assess prime cash vault fees into the temp cash balance. The account has accrued prime cash
-470:         // fees on the time since the fCash matured to the current block time. Setting lastUpdateBlockTime
-471:         // to the fCash maturity, will calculate the fees accrued since that time.
-472:         vaultAccount.lastUpdateBlockTime = vaultAccount.maturity;
-473:         vaultAccount.maturity = Constants.PRIME_CASH_VAULT_MATURITY;
-474:         vaultAccount.accountDebtUnderlying = vaultConfig.primeRate.convertDebtStorageToUnderlying(accountPrimeStorageValue);
-475:         vaultConfig.assessVaultFees(
-476:             vaultAccount,
-477:             vaultConfig.primeRate.convertFromUnderlying(vaultAccount.accountDebtUnderlying).neg(),
-478:             Constants.PRIME_CASH_VAULT_MATURITY,
-479:             block.timestamp
-480:         );
-```
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L487-L506
-
-```solidity
-File: VaultAccount.sol
-487:     function settleAccountOrAccruePrimeCashFees(
-488:         VaultAccount memory vaultAccount,
-489:         VaultConfig memory vaultConfig
-490:     ) internal returns (bool didSettle) {
-491:         // If the vault has matured, it will exit this settlement call in the prime cash maturity with
-492:         // fees assessed up to the current time. Transfers may occur but they are not relevant in this
-493:         // context since a collateral check will always be done on non-settlement methods.
-494:         (didSettle, /* */) = settleVaultAccount(vaultAccount, vaultConfig);
-495: 
-496:         // If the account did not settle but is in the prime cash maturity, assess a fee.
-497:         if (!didSettle && vaultAccount.maturity == Constants.PRIME_CASH_VAULT_MATURITY) {
-498:             // The prime cash fee is deducted from the tempCashBalance
-499:             vaultConfig.assessVaultFees(
-500:                 vaultAccount,
-501:                 vaultConfig.primeRate.convertFromUnderlying(vaultAccount.accountDebtUnderlying).neg(),
-502:                 vaultAccount.maturity,
-503:                 block.timestamp
-504:             );
-505:         }
-506:     }
-```
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L508-L520
-
-```solidity
-File: VaultAccount.sol
-508:     function accruePrimeCashFeesToDebtInLiquidation(
-509:         VaultAccount memory vaultAccount,
-510:         VaultConfig memory vaultConfig
-511:     ) internal returns (VaultState memory) {
-512:         vaultConfig.assessVaultFees(
-513:             vaultAccount,
-514:             vaultConfig.primeRate.convertFromUnderlying(vaultAccount.accountDebtUnderlying).neg(),
-515:             vaultAccount.maturity,
-516:             block.timestamp
-517:         );
-518: 
-519:         return accruePrimeCashFeesToDebt(vaultAccount, vaultConfig);
-520:     }
-```
-
-## Impact
-
-Ability to avoid paying vault fees altogether, disincentivising the use of non-prime vaults over prime vaults as sophisticated users can game fee mechanics.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L475-L480
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L487-L506
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultAccount.sol#L508-L520
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultConfiguration.sol#L277-L303
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultConfiguration.sol#L236-L268
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Total debt in all borrowed currencies needs to be taken into consideration when calling `VaultConfiguration.assessVaultFees()`. 
-
-`VaultSecondaryBorrow.getSecondaryBorrowCollateralFactors()` can be queried to retrieve the vault account's total secondary debt denominated in the primary account debt which can then be converted into prime cash alongside `accountDebtUnderlying`.
+Ensure this is well-understand and consider accruing interest under any circumstance. Alternatively, if we do not wish to accrue interest when the interest rate model has changed, then we need to make sure that `underlyingDelta` does not include this amount as `TreasuryAction._executeDeposits()` will ultimately update the vault's position in Compound.
 
 
 
 ## Discussion
 
-**T-Woodward**
-
-This is true, but it's not a vulnerability. It's also not necessarily a business problem in practice for a few reasons. It is suboptimal though.
-
 **jeffywu**
 
-True, however, Notional does collect fees on borrows via the fCash curve and Prime Debt fees already. I don't think we will be changing the existing functionality.
+Valid issue, although I would disagree with the severity since interest rate models are unlikely to change and we have already deprecated Compound V2 support.
+
+**0xleastwood**
+
+Escalate for 10 USDC
+
+While Compound V2 is intended to be deprecated, a substantial portion of Notional's codebase relied on extensively on this at contest time. Looking at severity guidelines, I think this one should be included as `medium` severity because the scenario is considered to be viable, although unlikely.
+
+> Medium: There is a viable scenario (even if unlikely) that could cause the protocol to enter a state where a material amount of funds can be lost. The attack path is possible with assumptions that either mimic on-chain conditions or reflect conditions that have a reasonable chance of becoming true in the future. The more expensive the attack is for an attacker, the less likely it will be included as a Medium (holding all other factors constant). The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+
+
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> While Compound V2 is intended to be deprecated, a substantial portion of Notional's codebase relied on extensively on this at contest time. Looking at severity guidelines, I think this one should be included as `medium` severity because the scenario is considered to be viable, although unlikely.
+> 
+> > Medium: There is a viable scenario (even if unlikely) that could cause the protocol to enter a state where a material amount of funds can be lost. The attack path is possible with assumptions that either mimic on-chain conditions or reflect conditions that have a reasonable chance of becoming true in the future. The more expensive the attack is for an attacker, the less likely it will be included as a Medium (holding all other factors constant). The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+> 
+> 
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+Agree with the points raised in the escalation. Considering this a valid medium 
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/189/#issuecomment-1569012370): accepted
 
 # Issue M-12: Debt cannot be repaid without redeeming vault share 
 
@@ -2438,176 +3214,7 @@ If the acceptable underlying delta for one holding (cToken) is $\approx0.0001$, 
 
 Instead of hardcoding the `REBALANCING_UNDERLYING_DELTA`, consider allowing the governance to adjust this acceptable underlying delta to accommodate more holdings in the future and to adapt to potential changes in market conditions.
 
-# Issue M-17: Possible to create vault positions ineligible for liquidation 
-
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/202 
-
-## Found by 
-xiaoming90
-## Summary
-
-Users can self-liquidate their secondary debt holdings in such a way that it is no longer possible to deleverage their vault account as `checkMinBorrow` will fail post-maturity.
-
-## Vulnerability Detail
-
-When deleveraging a vault account, the liquidator will pay down account debt directly and the account will not accrue any cash. Under most circumstances, it is not possible to put an account's debt below its minimum borrow size. 
-
-However, there are _two_ exceptions to this:
- - Liquidators purchasing cash from a vault account. This only applies to non-prime vault accounts.
- - A vault account is being settled and `checkMinBorrow` is skipped to ensure an account can always be settled.
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L57-L119
-
-```solidity
-File: VaultLiquidationAction.sol
-057:     function deleverageAccount(
-058:         address account,
-059:         address vault,
-060:         address liquidator,
-061:         uint16 currencyIndex,
-062:         int256 depositUnderlyingInternal
-063:     ) external payable nonReentrant override returns (
-064:         uint256 vaultSharesToLiquidator,
-065:         int256 depositAmountPrimeCash
-066:     ) {
-067:         require(currencyIndex < 3);
-068:         (
-069:             VaultConfig memory vaultConfig,
-070:             VaultAccount memory vaultAccount,
-071:             VaultState memory vaultState
-072:         ) = _authenticateDeleverage(account, vault, liquidator);
-073: 
-074:         PrimeRate memory pr;
-075:         // Currency Index is validated in this method
-076:         (
-077:             depositUnderlyingInternal,
-078:             vaultSharesToLiquidator,
-079:             pr
-080:         ) = IVaultAccountHealth(address(this)).calculateDepositAmountInDeleverage(
-081:             currencyIndex, vaultAccount, vaultConfig, vaultState, depositUnderlyingInternal
-082:         );
-083: 
-084:         uint16 currencyId = vaultConfig.borrowCurrencyId;
-085:         if (currencyIndex == 1) currencyId = vaultConfig.secondaryBorrowCurrencies[0];
-086:         else if (currencyIndex == 2) currencyId = vaultConfig.secondaryBorrowCurrencies[1];
-087: 
-088:         Token memory token = TokenHandler.getUnderlyingToken(currencyId);
-089:         // Excess ETH is returned to the liquidator natively
-090:         (/* */, depositAmountPrimeCash) = TokenHandler.depositUnderlyingExternal(
-091:             liquidator, currencyId, token.convertToExternal(depositUnderlyingInternal), pr, false 
-092:         );
-093: 
-094:         // Do not skip the min borrow check here
-095:         vaultAccount.vaultShares = vaultAccount.vaultShares.sub(vaultSharesToLiquidator);
-096:         if (vaultAccount.maturity == Constants.PRIME_CASH_VAULT_MATURITY) {
-097:             // Vault account will not incur a cash balance if they are in the prime cash maturity, their debts
-098:             // will be paid down directly.
-099:             _reduceAccountDebt(
-100:                 vaultConfig, vaultState, vaultAccount, pr, currencyIndex, depositUnderlyingInternal, true
-101:             );
-102:             depositAmountPrimeCash = 0;
-103:         }
-104: 
-105:         // Check min borrow in this liquidation method, the deleverage calculation should adhere to the min borrow
-106:         vaultAccount.setVaultAccountForLiquidation(vaultConfig, currencyIndex, depositAmountPrimeCash, true);
-107: 
-108:         emit VaultDeleverageAccount(vault, account, currencyId, vaultSharesToLiquidator, depositAmountPrimeCash);
-109:         emit VaultLiquidatorProfit(vault, account, liquidator, vaultSharesToLiquidator, true);
-110: 
-111:         _transferVaultSharesToLiquidator(
-112:             liquidator, vaultConfig, vaultSharesToLiquidator, vaultAccount.maturity
-113:         );
-114: 
-115:         Emitter.emitVaultDeleverage(
-116:             liquidator, account, vault, currencyId, vaultState.maturity,
-117:             depositAmountPrimeCash, vaultSharesToLiquidator
-118:         );
-119:     }
-```
-
-`currencyIndex` represents which currency is being liquidated and `depositUnderlyingInternal` the amount of debt being reduced. Only one currency's debt can be updated here.
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L239-L267
-
-```solidity
-File: VaultLiquidationAction.sol
-239:     function _reduceAccountDebt(
-240:         VaultConfig memory vaultConfig,
-241:         VaultState memory vaultState,
-242:         VaultAccount memory vaultAccount,
-243:         PrimeRate memory primeRate,
-244:         uint256 currencyIndex,
-245:         int256 depositUnderlyingInternal,
-246:         bool checkMinBorrow
-247:     ) private {
-248:         if (currencyIndex == 0) {
-249:             vaultAccount.updateAccountDebt(vaultState, depositUnderlyingInternal, 0);
-250:             vaultState.setVaultState(vaultConfig);
-251:         } else {
-252:             // Only set one of the prime rates, the other prime rate is not used since
-253:             // the net debt amount is set to zero
-254:             PrimeRate[2] memory pr;
-255:             pr[currencyIndex - 1] = primeRate;
-256: 
-257:             VaultSecondaryBorrow.updateAccountSecondaryDebt(
-258:                 vaultConfig,
-259:                 vaultAccount.account,
-260:                 vaultAccount.maturity,
-261:                 currencyIndex == 1 ? depositUnderlyingInternal : 0,
-262:                 currencyIndex == 2 ? depositUnderlyingInternal : 0,
-263:                 pr,
-264:                 checkMinBorrow
-265:             );
-266:         }
-267:     }
-```
-
-In the case of vault settlement, through self-liquidation, users can setup their debt and cash holdings post-settlement, such that both `accountDebtOne` and `accountDebtTwo` are non-zero and less than `vaultConfig.minAccountSecondaryBorrow`. The objective would be to have zero primary debt and `Y` secondary debt and `X` secondary cash. Post-settlement, cash is used to offset debt (`Y - X < minAccountSecondaryBorrow`) and due to the lack of `checkMinBorrow` in `VaultAccountAction.settleVaultAccount()`, both secondary currencies can have debt holdings below the minimum amount.
-
-Now when `deleverageAccount()` is called on a prime vault account, debts are paid down directly. However, if we are only able to pay down one secondary currency at a time, `checkMinBorrow` will fail in `VaultSecondaryBorrow.updateAccountSecondaryDebt()` because both debts are checked.
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultSecondaryBorrow.sol#L295-L299
-
-```solidity
-File: VaultSecondaryBorrow.sol
-295:         if (checkMinBorrow) {
-296:             // No overflow on negation due to overflow checks above
-297:             require(accountDebtOne == 0 || vaultConfig.minAccountSecondaryBorrow[0] <= -accountDebtOne, "min borrow");
-298:             require(accountDebtTwo == 0 || vaultConfig.minAccountSecondaryBorrow[1] <= -accountDebtTwo, "min borrow");
-299:         }
-```
-
-No prime fees accrue on secondary debt, hence, this debt will never reach a point where it is above the minimum borrow amount.
-
-## Impact
-
-Malicious actors can generate vault accounts which cannot be liquidated. Through opening numerous vault positions, Notional can rack up significant exposure and accrue bad debt as a result.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L57-L119
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L239-L267
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultSecondaryBorrow.sol#L295-L299
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Either allow for multiple currencies to be liquidated or ensure that `checkMinBorrow` is performed only on the currency which is being liquidated.
-
-
-
-## Discussion
-
-**T-Woodward**
-
-True. Also I don't think you need to settle the accounts. If you call liquidateVaultCashBalance I believe min borrow checks will be skipped on all currencies, so you could just deleverage twice to get positive cash balances on each secondary currency and then liquidateVaultCashBalance on each to get both secondary currency debts below min.
-
-# Issue M-18: Liquidation frontrunning can prevent debt repayment upon unpausing (restoring full router) 
+# Issue M-17: Liquidation frontrunning can prevent debt repayment upon unpausing (restoring full router) 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/203 
 
@@ -2640,115 +3247,89 @@ Manual Review
 ## Recommendation
 If liquidation is not allowed during a pause, add a grace period after unpausing during which liquidation remains blocked to allow users to avoid unfair liquidation by repaying debt or supplying additional collateral.
 
-# Issue M-19: Partial liquidations are not possible 
-
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/204 
-
-## Found by 
-xiaoming90
-## Summary
-
-Due to an incorrect implementation of `VaultValuation.getLiquidationFactors()`, Notional requires that a liquidator reduces an account's debt below `minBorrowSize`. This does not allow liquidators to partially liquidate a vault account into a healthy position and opens up the protocol to an edge case where an account is always ineligible for liquidation. 
-
-## Vulnerability Detail
-
-While `VaultValuation.getLiquidationFactors()` might allow for the resultant outstanding debt to be below the minimum borrow amount and non-zero, `deleverageAccount()` will revert due to `checkMinBorrow` being set to `true`. Therefore, the only option is for liquidators to wipe the outstanding debt entirely but users can set up their vault accounts such that that `maxLiquidatorDepositLocal` is less than each of the vault currency's outstanding debt.
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultValuation.sol#L240-L270
-
-```solidity
-File: VaultValuation.sol
-240:         int256 maxLiquidatorDepositLocal = _calculateDeleverageAmount(
-241:             vaultConfig,
-242:             h.vaultShareValueUnderlying,
-243:             h.totalDebtOutstandingInPrimary.neg(),
-244:             h.debtOutstanding[currencyIndex].neg(),
-245:             minBorrowSize,
-246:             exchangeRate,
-247:             er.rateDecimals
-248:         );
-249: 
-250:         // NOTE: deposit amount is always positive in this method
-251:         if (depositUnderlyingInternal < maxLiquidatorDepositLocal) {
-252:             // If liquidating past the debt outstanding above the min borrow, then the entire
-253:             // debt outstanding must be liquidated.
-254: 
-255:             // (debtOutstanding - depositAmountUnderlying) is the post liquidation debt. As an
-256:             // edge condition, when debt outstanding is discounted to present value, the account
-257:             // may be liquidated to zero while their debt outstanding is still greater than the
-258:             // min borrow size (which is normally enforced in notional terms -- i.e. non present
-259:             // value). Resolving this would require additional complexity for not much gain. An
-260:             // account within 20% of the minBorrowSize in a vault that has fCash discounting enabled
-261:             // may experience a full liquidation as a result.
-262:             require(
-263:                 h.debtOutstanding[currencyIndex].sub(depositUnderlyingInternal) < minBorrowSize,
-264:                 "Must Liquidate All Debt"
-265:             );
-266:         } else {
-267:             // If the deposit amount is greater than maxLiquidatorDeposit then limit it to the max
-268:             // amount here.
-269:             depositUnderlyingInternal = maxLiquidatorDepositLocal;
-270:         }
-```
-
-If `depositUnderlyingInternal >= maxLiquidatorDepositLocal`, then the liquidator's deposit is capped to `maxLiquidatorDepositLocal`. However, `maxLiquidatorDepositLocal` may put the vault account's outstanding debt below the minimum borrow amount but not to zero. 
-
-However, because it is not possible to partially liquidate the account's debt, we reach a deadlock where it isn't possible to liquidate all outstanding debt and it also isn't possible to liquidate debt partially. So even though it may be possible to liquidate an account into a healthy position, the current implementation doesn't always allow for this to be true.
-
-## Impact
-
-Certain vault positions will never be eligible for liquidation and hence Notional may be left with bad debt. Liquidity providers will lose funds as they must cover the shortfall for undercollateralised positions.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L76-L82
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountHealth.sol#L260-L264
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/internal/vaults/VaultValuation.sol#L240-L270
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-`VaultValuation.getLiquidationFactors()` must be updated to allow for partial liquidations.
-
-```solidity
-File: VaultValuation.sol
-251:         if (depositUnderlyingInternal < maxLiquidatorDepositLocal) {
-252:             // If liquidating past the debt outstanding above the min borrow, then the entire
-253:             // debt outstanding must be liquidated.
-254: 
-255:             // (debtOutstanding - depositAmountUnderlying) is the post liquidation debt. As an
-256:             // edge condition, when debt outstanding is discounted to present value, the account
-257:             // may be liquidated to zero while their debt outstanding is still greater than the
-258:             // min borrow size (which is normally enforced in notional terms -- i.e. non present
-259:             // value). Resolving this would require additional complexity for not much gain. An
-260:             // account within 20% of the minBorrowSize in a vault that has fCash discounting enabled
-261:             // may experience a full liquidation as a result.
-262:             require(
-263:                 h.debtOutstanding[currencyIndex].neg().sub(depositUnderlyingInternal) >= minBorrowSize,
-                         || h.debtOutstanding[currencyIndex].neg().sub(depositUnderlyingInternal) == 0
-264:                 "Must Liquidate All Debt"
-265:             );
-266:         } else {
-267:             // If the deposit amount is greater than maxLiquidatorDeposit then limit it to the max
-268:             // amount here.
-269:             depositUnderlyingInternal = maxLiquidatorDepositLocal;
-270:         }
-```
-
 
 
 ## Discussion
 
-**T-Woodward**
+**0x00ffDa**
 
-This is true. This is an issue when a vaultAccount is borrowing from the prime maturity, but not an issue when an account is borrowing from an fCash maturity.
+Escalate for 10 USDC
 
-# Issue M-20: Underlying delta is calculated on internal token balance 
+I believe this finding should be reclassified as "High" severity because it meets all the current Sherlock criteria for "High" issues:
+
+> High: This vulnerability would result in a material loss of funds, and the cost of the attack is low (relative to the amount of funds lost). The attack path is possible with reasonable assumptions that mimic on-chain conditions. The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+
+Specifically ... unfair liquidation is a material loss of user funds and can occur with low cost by any liquidator. Use of the `PauseRouter` is expected in any upgrade and it may also be used in other circumstances, so this is not "stars must align" scenario. The sponsor has already confirmed this is a valid finding.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> I believe this finding should be reclassified as "High" severity because it meets all the current Sherlock criteria for "High" issues:
+> 
+> > High: This vulnerability would result in a material loss of funds, and the cost of the attack is low (relative to the amount of funds lost). The attack path is possible with reasonable assumptions that mimic on-chain conditions. The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+> 
+> Specifically ... unfair liquidation is a material loss of user funds and can occur with low cost by any liquidator. Use of the `PauseRouter` is expected in any upgrade and it may also be used in other circumstances, so this is not "stars must align" scenario. The sponsor has already confirmed this is a valid finding.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**0xleastwood**
+
+> Escalate for 10 USDC
+> 
+> I believe this finding should be reclassified as "High" severity because it meets all the current Sherlock criteria for "High" issues:
+> 
+> > High: This vulnerability would result in a material loss of funds, and the cost of the attack is low (relative to the amount of funds lost). The attack path is possible with reasonable assumptions that mimic on-chain conditions. The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+> 
+> Specifically ... unfair liquidation is a material loss of user funds and can occur with low cost by any liquidator. Use of the `PauseRouter` is expected in any upgrade and it may also be used in other circumstances, so this is not "stars must align" scenario. The sponsor has already confirmed this is a valid finding.
+
+The pause router is not expected in any upgrade to the Notional protocol. It is only used in an emergency situation, so by definition, this is already an unlikely scenario to occur. Additionally, it would be safer to allow for liquidations after the protocol has been unpaused because this is how the protocol is designed to stay solvent. Adding an arbitrary grace period only adds to the risk that a vault position may become undercollateralised. If anything, a better approach would be to allow for vault accounts to be liquidated from within the pause router because this functionality isn't currently enabled.
+
+**0xleastwood**
+
+I do think Notional prioritises protocol solvency in this emergency situations over user experience and I think this is the correct approach.
+
+**0x00ffDa**
+
+> The pause router is not expected in any upgrade to the Notional protocol.
+
+[From my reading of the V3 upgrade script](https://github.com/notional-finance/contracts-v2/blob/b20a45c912785fab5f2b62992e5260f44dbae197/scripts/mainnet/V3Environment.py#L250), it does plan to use the PauseRouter.
+
+
+**0xleastwood**
+
+> > The pause router is not expected in any upgrade to the Notional protocol.
+> 
+> [From my reading of the V3 upgrade script](https://github.com/notional-finance/contracts-v2/blob/b20a45c912785fab5f2b62992e5260f44dbae197/scripts/mainnet/V3Environment.py#L250), it does plan to use the PauseRouter.
+
+I think this is unique to V3 migration because it takes a bit of time and requires multiple steps to perform. But generally speaking, most patch fixes can be done atomically.
+
+**jeffywu**
+
+> The vulnerability must be something that is not considered an acceptable risk by a reasonable protocol team.
+
+We will take this risk during the upgrade. So if that is the definition of a high priority issue then this is not a high priority issue.
+
+**hrishibhat**
+
+Result:
+Medium
+Unique 
+Considering this issue a valid medium given the circumstances under which this would occur and as mentioned by the Sponsor this can be considered an accepted risk. 
+
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0x00ffDa](https://github.com/sherlock-audit/2023-03-notional-judging/issues/203/#issuecomment-1570567625): rejected
+
+# Issue M-18: Underlying delta is calculated on internal token balance 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/205 
 
@@ -2817,134 +3398,7 @@ Consider using the external token balance and scale `Constants.REBALANCING_UNDER
 
 Valid suggestion
 
-# Issue M-21: Vault accounts with excess cash can avoid being settled 
-
-Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/207 
-
-## Found by 
-xiaoming90
-## Summary
-
-If excess cash was transferred out from an account during account settlement, then the protocol will check the account's collateral ratio and revert if the position is unhealthy. Because it may not be possible to settle a vault account, liquidators cannot reduce account debt by purchasing vault shares because `_authenticateDeleverage()` will check to see if a vault has matured.
-
-## Vulnerability Detail
-
-Considering an account's health is determined by a combination of its outstanding debt, cash holdings and the total underlying value of its vault shares, transferring out excess cash may actually put an account in an unhealthy position. 
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountAction.sol#L41-L68
-
-```solidity
-File: VaultAccountAction.sol
-41:     function settleVaultAccount(address account, address vault) external override nonReentrant {
-42:         requireValidAccount(account);
-43:         require(account != vault);
-44: 
-45:         VaultConfig memory vaultConfig = VaultConfiguration.getVaultConfigStateful(vault);
-46:         VaultAccount memory vaultAccount = VaultAccountLib.getVaultAccount(account, vaultConfig);
-47:         
-48:         // Require that the account settled, otherwise we may leave the account in an unintended
-49:         // state in this method because we allow it to skip the min borrow check in the next line.
-50:         (bool didSettle, bool didTransfer) = vaultAccount.settleVaultAccount(vaultConfig);
-51:         require(didSettle, "No Settle");
-52: 
-53:         vaultAccount.accruePrimeCashFeesToDebt(vaultConfig);
-54: 
-55:         // Skip Min Borrow Check so that accounts can always be settled
-56:         vaultAccount.setVaultAccount({vaultConfig: vaultConfig, checkMinBorrow: false});
-57: 
-58:         if (didTransfer) {
-59:             // If the vault did a transfer (i.e. withdrew cash) we have to check their collateral ratio. There
-60:             // is an edge condition where a vault with secondary borrows has an emergency exit. During that process
-61:             // an account will be left some cash balance in both currencies. It may have excess cash in one and
-62:             // insufficient cash in the other. A withdraw of the excess in one side will cause the vault account to
-63:             // be insolvent if we do not run this check. If this scenario indeed does occur, the vault itself must
-64:             // be upgraded in order to facilitate orderly exits for all of the accounts since they will be prevented
-65:             // from settling.
-66:             IVaultAccountHealth(address(this)).checkVaultAccountCollateralRatio(vault, account);
-67:         }
-68:     }
-```
-
-It is important to note that all vault liquidation actions require a vault to first be settled. Hence, through self-liquidation, sophisticated vault accounts can have excess cash in one currency and significant debt holdings in the vault's other currencies. 
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L197-L237
-
-```solidity
-File: VaultLiquidationAction.sol
-197:     function _authenticateDeleverage(
-198:         address account,
-199:         address vault,
-200:         address liquidator
-201:     ) private returns (
-202:         VaultConfig memory vaultConfig,
-203:         VaultAccount memory vaultAccount,
-204:         VaultState memory vaultState
-205:     ) {
-206:         // Do not allow invalid accounts to liquidate
-207:         requireValidAccount(liquidator);
-208:         require(liquidator != vault);
-209: 
-210:         // Cannot liquidate self, if a vault needs to deleverage itself as a whole it has other methods 
-211:         // in VaultAction to do so.
-212:         require(account != msg.sender);
-213:         require(account != liquidator);
-214: 
-215:         vaultConfig = VaultConfiguration.getVaultConfigStateful(vault);
-216:         require(vaultConfig.getFlag(VaultConfiguration.DISABLE_DELEVERAGE) == false);
-217: 
-218:         // Authorization rules for deleveraging
-219:         if (vaultConfig.getFlag(VaultConfiguration.ONLY_VAULT_DELEVERAGE)) {
-220:             require(msg.sender == vault);
-221:         } else {
-222:             require(msg.sender == liquidator);
-223:         }
-224: 
-225:         vaultAccount = VaultAccountLib.getVaultAccount(account, vaultConfig);
-226: 
-227:         // Vault accounts that are not settled must be settled first by calling settleVaultAccount
-228:         // before liquidation. settleVaultAccount is not permissioned so anyone may settle the account.
-229:         require(block.timestamp < vaultAccount.maturity, "Must Settle");
-230: 
-231:         if (vaultAccount.maturity == Constants.PRIME_CASH_VAULT_MATURITY) {
-232:             // Returns the updated prime vault state
-233:             vaultState = vaultAccount.accruePrimeCashFeesToDebtInLiquidation(vaultConfig);
-234:         } else {
-235:             vaultState = VaultStateLib.getVaultState(vaultConfig, vaultAccount.maturity);
-236:         }
-237:     }
-```
-
-Consider the following example:
-
-Alice has a valid borrow position in the vault which is considered risky. She has a small bit of secondary cash but most of her debt is primary currency denominated. Generally speaking her vault is healthy. Upon settlement, the small bit of excess secondary cash is transferred out and her vault is undercollateralised and eligible for liquidation. However, we are deadlocked because it is not possible to settle the vault because `checkVaultAccountCollateralRatio()` will fail, and it's not possible to purchase the excess cash and offset the debt directly via `liquidateVaultCashBalance()` or `deleverageAccount()` because `_authenticateDeleverage()` will revert if a vault has not yet been settled.
-
-## Impact
-
-Vault accounts can create positions which will never be eligible for liquidation and the protocol may accrue bad debt.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultAccountAction.sol#L41-L68
-
-https://github.com/sherlock-audit/2023-03-notional-0xleastwood/blob/main/contracts-v2/contracts/external/actions/VaultLiquidationAction.sol#L197-L237
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Consider adding a liquidation method which settles a vault account and allows for a liquidator to purchase vault shares, offsetting outstanding debt, before performing collateral ratio checks.
-
-
-
-## Discussion
-
-**T-Woodward**
-
-We're changing settlement to just leave excess cash in the account's cash balance and not transfer out. This allows us to drop the collateral check and remove this issue.
-
-# Issue M-22: Secondary debt dust balances are not truncated 
+# Issue M-19: Secondary debt dust balances are not truncated 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/210 
 
@@ -3019,7 +3473,7 @@ Consider truncating dust balance in secondary debt within the `_updateTotalSecon
 
 Valid, medium severity looks good
 
-# Issue M-23: No minimum borrow size check against secondary debts 
+# Issue M-20: No minimum borrow size check against secondary debts 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/212 
 
@@ -3081,7 +3535,7 @@ Consider performing a similar check against the secondary debts (`accountDebtOne
 
 Valid issue
 
-# Issue M-24: It may be possible to liquidate on behalf of another account 
+# Issue M-21: It may be possible to liquidate on behalf of another account 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/215 
 
@@ -3165,4 +3619,32 @@ Make the necessary changes to `BaseStrategyVault.sol` or `_authenticateDeleverag
 **jeffywu**
 
 Valid issue, the fix will be made in BaseStrategyVault. It's unclear how this would be done in `_authenticateDeleverage()`, but I am open to suggestions from the auditors there.
+
+**Jiaren-tang**
+
+Escalate for 10 USDC. Severity is high because this force liquidator to liquidate the position they are not willing to and make the liquiditator lose fund
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC. Severity is high because this force liquidator to liquidate the position they are not willing to and make the liquiditator lose fund
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Result:
+Medium
+Has duplicates
+Given there preconditions for the issue that results in an undesirable outcome, there is no clear loss of funds to consider this a high issue. This is a valid medium. 
+
+**sherlock-admin**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [ShadowForce](https://github.com/sherlock-audit/2023-03-notional-judging/issues/215/#issuecomment-1570480492): rejected
 
