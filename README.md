@@ -65,6 +65,7 @@ Transfer all balances, not using `netBalance`
 
 
 
+
 ## Discussion
 
 **Jiaren-tang**
@@ -246,6 +247,19 @@ Manual Review
             } else {
 ```
 
+
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/135
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/135
 
 # Issue H-3: `VaultAccountSecondaryDebtShareStorage.maturity` will be cleared prematurely 
 
@@ -487,6 +501,18 @@ Fetch the prime rate of both secondary currencies because they are both needed w
     }
 ```
 
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/127
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/127
+
 # Issue H-4: StrategyVault can perform a full exit without repaying all secondary debt 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/184 
@@ -565,6 +591,14 @@ vaultAccount.setVaultAccount({vaultConfig: vaultConfig, checkMinBorrow: true});
 
 Valid suggestion
 
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/128
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/128
+
 # Issue H-5: Unable to transfer fee reserve assets to treasury 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/190 
@@ -627,6 +661,18 @@ Negate the value returned by the `TokenHandler.withdrawPrimeCash` function.
 -       );
 +       ).neg();
 ```
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/119
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/119
 
 # Issue H-6: Excess funds withdrawn from the money market 
 
@@ -705,6 +751,14 @@ Consider withdrawing only the shortfall amount from the money market.
 **jeffywu**
 
 Valid Issue
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/125
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/125.
 
 # Issue H-7: Possible to liquidate past the debt outstanding above the min borrow without liquidating the entire debt outstanding 
 
@@ -824,6 +878,18 @@ require(false) // revert
 ```
 
 The above will trigger a revert as expected when the debt outstanding does not meet the minimal borrow size.
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/132
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/132
 
 # Issue H-8: Vaults can avoid liquidations by not letting their vault account be settled 
 
@@ -957,6 +1023,23 @@ Consider wrapping `ETH` under all circumstances. This will prevent vault account
 **jeffywu**
 
 Valid Issue, in our fixes we remove transfers from Settle Vault Account.
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/135
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: PR 135 attempted to fix the issue by removing the transfer of excess assets from the settlement.  It will store the excess assets to be refunded in `s.primaryCash` so that it can be read to `vaultAccount.tempCashBalance` later when exiting the vault (`VaultAccountAction.exitVault`). The transfer of excess assets will be performed during the exit vault.
+
+However, in an edge case where a liquidator deleverages another account and happens to have primary cash in their vault account, their `s.primaryCash` (excess cash) will be wiped.
+
+Following is the function call flow for reference:
+`deleverageAccount` -> `_transferVaultSharesToLiquidator` -> `liquidator.setVaultAccount` -> Effect: liquidator's `s.primaryCash = 0`
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: Verified fix as per comments in #207. Fixed in https://github.com/notional-finance/contracts-v2/pull/135
 
 # Issue H-9: Possible to create vault positions ineligible for liquidation 
 
@@ -1167,6 +1250,14 @@ Escalations have been resolved successfully!
 Escalation status:
 - [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/202/#issuecomment-1567533404): accepted
 
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/138
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/138
+
 # Issue H-10: Partial liquidations are not possible 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/204 
@@ -1310,6 +1401,14 @@ Escalations have been resolved successfully!
 
 Escalation status:
 - [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/204/#issuecomment-1567569448): accepted
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/132
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/132
 
 # Issue H-11: Vault accounts with excess cash can avoid being settled 
 
@@ -1477,6 +1576,62 @@ Escalations have been resolved successfully!
 
 Escalation status:
 - [0xleastwood](https://github.com/sherlock-audit/2023-03-notional-judging/issues/207/#issuecomment-1567536805): accepted
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/135
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: PR 135 attempted to fix the issue by removing the transfer of excess assets from the settlement.  It will store the excess assets to be refunded in `s.primaryCash` so that it can be read to `vaultAccount.tempCashBalance` later when exiting the vault (`VaultAccountAction.exitVault`). The transfer of excess assets will be performed during the exit vault.
+
+However, in an edge case where a liquidator deleverages another account and happens to have primary cash in their vault account, their `s.primaryCash` (excess cash) will be wiped.
+
+Following is the function call flow for reference:
+`deleverageAccount` -> `_transferVaultSharesToLiquidator` -> `liquidator.setVaultAccount` -> Effect: liquidator's `s.primaryCash = 0`
+
+**jeffywu**
+
+I'm not sure this is the case:
+
+```
+    function _transferVaultSharesToLiquidator(
+        address receiver,
+        VaultConfig memory vaultConfig,
+        uint256 vaultSharesToLiquidator,
+        uint256 maturity
+    ) private {
+        // Liquidator will receive vault shares that they can redeem by calling exitVault. If the liquidator has a
+        // leveraged position on then their collateral ratio will increase
+        VaultAccount memory liquidator = VaultAccountLib.getVaultAccount(receiver, vaultConfig);
+        // The liquidator must be able to receive the vault shares (i.e. not be in the vault at all or be in the
+        // vault at the same maturity). If the liquidator has fCash in the current maturity then their collateral
+        // ratio will increase as a result of the liquidation, no need to check their collateral position.
+        require(liquidator.maturity == 0 || liquidator.maturity == maturity, "Maturity Mismatch"); // dev: has vault shares
+        liquidator.maturity = maturity;
+        liquidator.vaultShares = liquidator.vaultShares.add(vaultSharesToLiquidator);
+        liquidator.setVaultAccount({vaultConfig: vaultConfig, checkMinBorrow: true, emitEvents: false});
+    }
+```
+
+1. In `getVaultAccount` the vault cash balance will be loaded into `tempCashBalance` 
+2. In `setVaultAccount` we call `_setVaultAccount`
+3. The first line of `_setVaultAccount` requires that the tempCashBalance is equal to zero. This will revert the deleverage transaction before the cash balance is cleared.
+
+**0xleastwood**
+
+You're right! I've checked this and agree that the flow of execution would look like:
+```sh
+VaultLiquidationAction.deleverageAccount
+└── VaultAccount.getVaultAccount
+    └── liquidator.tempCashBalance = s.primaryCash // Set to non-zero value
+└── VaultLiquidationAction._transferVaultSharesToLiquidator
+    └── liquidator.setVaultAccount
+        └── VaultAccount._setVaultAccount
+            └── require(vaultAccount.tempCashBalance == 0) // Revert
+```
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in https://github.com/notional-finance/contracts-v2/pull/135.
 
 # Issue M-1: Lack of ERC20 approval on depositing to external money markets Compound V2 
 
@@ -1759,6 +1914,7 @@ function convertFromStorage(
         }
     }
 ```
+
 
 
 # Issue M-4: Compound exchange rate can be manipulated to withdraw more underlying tokens from NotionalV3 
@@ -2172,6 +2328,23 @@ maybe let admin bypass the withdrawPrimeCash and force settle the account to not
 
 Valid issue, transfers during supposedly permissionless settlement can indeed cause issues.
 
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/135
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: PR 135 attempted to fix the issue by removing the transfer of excess assets from the settlement.  It will store the excess assets to be refunded in `s.primaryCash` so that it can be read to `vaultAccount.tempCashBalance` later when exiting the vault (`VaultAccountAction.exitVault`). The transfer of excess assets will be performed during the exit vault.
+
+However, in an edge case where a liquidator deleverages another account and happens to have primary cash in their vault account, their `s.primaryCash` (excess cash) will be wiped.
+
+Following is the function call flow for reference:
+`deleverageAccount` -> `_transferVaultSharesToLiquidator` -> `liquidator.setVaultAccount` -> Effect: liquidator's `s.primaryCash = 0`
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: Verified fix as per comments in #207. Fixed in https://github.com/notional-finance/contracts-v2/pull/135
+
 # Issue M-6: getAccountPrimeDebtBalance() always return 0 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/173 
@@ -2229,6 +2402,19 @@ Manual Review
 +       debtBalance = cashBalance < 0 ? cashBalance : 0;
     }
 ```
+
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/134
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/134
 
 # Issue M-7: A single external protocol can DOS rebalancing process 
 
@@ -2335,6 +2521,48 @@ Manual Review
 ## Recommendation
 
 Consider implementing a more resilient rebalancing process that allows for failures in individual external money markets. For instance, Notional could catch reverts from individual money markets and continue the rebalancing process with the remaining markets. 
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/117
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: The MM redemption failure has been handled in PR https://github.com/notional-finance/contracts-v2/pull/117 so that a single redemption failure/revert will not DOS the entire rebalance process. However, it was observed that a single failure/revert when depositing into MMs will still DOS the entire rebalance process. Thus, this issue is partially fixed.
+
+**jeffywu**
+
+@0xleastwood, having the contract revert during deposits on a single money market is intended here. Our reasoning is that it is always safer to hold underlying funds rather than put them on money markets and forgo the additional yield. Therefore, redemptions will always succeed as much as possible, but deposits will fail. The effect here is that the contract will always hold excess underlying if there are any money market failures, sort of like automatically going into "safe mode" if anything is reverting.
+
+Furthermore, having deposits succeed but redemptions fail will cause issues with calculations of how much to deposit and redeem if the contract is attempting to go from one money market (which fails redemption) and another money market (where we try to deposit funds that were never redeemed). We decided the added complexity here was not worth the additional benefit.
+
+**0xleastwood**
+
+> @0xleastwood, having the contract revert during deposits on a single money market is intended here. Our reasoning is that it is always safer to hold underlying funds rather than put them on money markets and forgo the additional yield. Therefore, redemptions will always succeed as much as possible, but deposits will fail. The effect here is that the contract will always hold excess underlying if there are any money market failures, sort of like automatically going into "safe mode" if anything is reverting.
+> 
+> Furthermore, having deposits succeed but redemptions fail will cause issues with calculations of how much to deposit and redeem if the contract is attempting to go from one money market (which fails redemption) and another money market (where we try to deposit funds that were never redeemed). We decided the added complexity here was not worth the additional benefit.
+
+I agree that this is the correct and is the most safe approach. Consider the case where the desired portions of MMs is (AAVE, Compound, Morpho) at (30%, 30%, 40%) and it is currently at (40%, 40%, 20%). 20% would be redeemed from Morpho and 10% would be deposited into AAVE and Compound. Handling redemptions failures by skipping the deposit step makes sense to keep underlying funds available and "safe". 
+
+However, we are not actually adhering to this idea of safety where in the example provided, a Morpho MM redemption succeeds but we are unable to deposit 10% of funds into AAVE. Ultimately, we should silently handle a failed MM deposit as we are effectively keeping funds available that way.
+
+**0xleastwood**
+
+Otherwise, we are keeping the same dependency on protocols being able to DoS the rebalancing process. Priority should be made to keep funds available by allowing MMs to always redeem but preventing any single MM from DoS'ing via deposit.
+
+**0xleastwood**
+
+Circling back to this, it appears that reverts are already handled correctly. The comment on this line made it seem that this was not the case.
+
+https://github.com/notional-finance/contracts-v2/pull/117/files#diff-293f4ba7dc1c8e8b05afa4825c463d18cacec0625a52bb897a38bd1046c18c31R336
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in https://github.com/notional-finance/contracts-v2/pull/117
 
 # Issue M-8: Inadequate slippage control 
 
@@ -2482,6 +2710,18 @@ Manual Review
 
 Consider updating the slippage control to compare the user's acceptable interest rate limit (`rateLimit`) against the interest rate used during the trade execution (`postFeeInterestRate`).
 
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/126
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/126
+
 # Issue M-9: Inconsistent use of `VAULT_ACCOUNT_MIN_TIME` in vault implementation 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/179 
@@ -2530,6 +2770,7 @@ Manual Review
 ## Recommendation
 
 It might be worth adding an exception to `VaultConfiguration.settleAccountOrAccruePrimeCashFees()` so that when vault fees are calculated, `lastUpdatedBlockTime` is not updated to `block.timestamp`.
+
 
 
 
@@ -2885,6 +3126,14 @@ File: StrategyUtils.sol
 
 Agree with the issue, however, the fix will be to remove the error from _redeemStrategyTokens. We should always call the vault in case there is something it needs to do during the vault action.
 
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/leveraged-vaults/pull/54
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in the codebase of Notional's Leverage Vault in PR https://github.com/notional-finance/leveraged-vaults/pull/54
+
 # Issue M-13: Vault account might not be able to exit after liquidation 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/192 
@@ -2935,6 +3184,18 @@ Manual Review
 ## Recommendation
 
 Consider refunding the excess positive `vaultAccount.tempCashBalance` to the users so that `vaultAccount.tempCashBalance` will be cleared (set to zero) before calling the `redeemWithDebtRepayment` function.
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/133
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/133
 
 # Issue M-14: Rebalance process reverts due to zero amount deposit and redemption 
 
@@ -3082,6 +3343,18 @@ function _executeDeposits(Token memory underlyingToken, DepositData[] memory dep
         // if depositData is not initialized, skip to the next one
 ```
 
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/120
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/120
+
 # Issue M-15: Inaccurate settlement reserve accounting 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/196 
@@ -3142,6 +3415,18 @@ It is recommended to implement the following fix:
 - int256 fCashDebtInReserve = -int256(s.fCashDebtHeldInSettlementReserve);
 + int256 fCashDebtInReserve = int256(s.fCashDebtHeldInSettlementReserve);
 ```
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/139
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/139
 
 # Issue M-16: Rebalance stops working when more holdings are added 
 
@@ -3213,6 +3498,18 @@ Manual Review
 If the acceptable underlying delta for one holding (cToken) is $\approx0.0001$, the acceptable underlying delta for three holdings should be $\approx0.0003$ to factor in the accumulated rounding error or underlying delta.
 
 Instead of hardcoding the `REBALANCING_UNDERLYING_DELTA`, consider allowing the governance to adjust this acceptable underlying delta to accommodate more holdings in the future and to adapt to potential changes in market conditions.
+
+
+
+## Discussion
+
+**jeffywu**
+
+Fixed in this PR: https://github.com/notional-finance/contracts-v2/pull/118
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/118. The issue of unnecessary scaling in PR 118 has been resolved in this commit (https://github.com/notional-finance/contracts-v2/commit/a200877c2b1d7c9f4a13b1fd84c8ecd3dae005a9).
 
 # Issue M-17: Liquidation frontrunning can prevent debt repayment upon unpausing (restoring full router) 
 
@@ -3398,6 +3695,28 @@ Consider using the external token balance and scale `Constants.REBALANCING_UNDER
 
 Valid suggestion
 
+**jeffywu**
+
+Fixed: https://github.com/notional-finance/contracts-v2/pull/118
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in PR https://github.com/notional-finance/contracts-v2/pull/118. The issue of unnecessary scaling in PR 118 has been resolved in this commit (https://github.com/notional-finance/contracts-v2/commit/a200877c2b1d7c9f4a13b1fd84c8ecd3dae005a9).
+
+Additional Suggestion: Small improvement could be made where the delta is only checked if the change moves in the negative direction. This would protect the protocol a bit more from DoS-style of attacks via donation.
+
+**jeffywu**
+
+@0xleastwood, the `getTotalUnderlyingValueStateful` method reads from an internally tracked contract balance so it should not be affected by any donations to the protocol. However, agree that only checking to the downside would be slightly more efficient here.
+
+**0xleastwood**
+
+Good point, I forgot that was the case.
+
+**0xleastwood**
+
+@0xleastwood + @xiaoming9090: Verified. Fixed in https://github.com/notional-finance/contracts-v2/pull/118
+
 # Issue M-19: Secondary debt dust balances are not truncated 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/210 
@@ -3473,6 +3792,18 @@ Consider truncating dust balance in secondary debt within the `_updateTotalSecon
 
 Valid, medium severity looks good
 
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/contracts-v2/pull/137
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Understood from the team that the truncation of dust is no longer necessary. Thus, they have been removed from the codebase. Update made in PR https://github.com/notional-finance/contracts-v2/pull/137
+
+**jacksanford1**
+
+Sherlock note: Classifying this as fixed. 
+
 # Issue M-20: No minimum borrow size check against secondary debts 
 
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/212 
@@ -3534,6 +3865,10 @@ Consider performing a similar check against the secondary debts (`accountDebtOne
 **jeffywu**
 
 Valid issue
+
+**jeffywu**
+
+Upon further review, it seems like the issue is invalid. Minimum borrow checks are applied every time debt changes.
 
 # Issue M-21: It may be possible to liquidate on behalf of another account 
 
@@ -3647,4 +3982,12 @@ Escalations have been resolved successfully!
 
 Escalation status:
 - [ShadowForce](https://github.com/sherlock-audit/2023-03-notional-judging/issues/215/#issuecomment-1570480492): rejected
+
+**jeffywu**
+
+Fixed in: https://github.com/notional-finance/leveraged-vaults/pull/55
+
+**xiaoming9090**
+
+@0xleastwood + @xiaoming9090 : Verified. Fixed in PR https://github.com/notional-finance/leveraged-vaults/pull/55
 
