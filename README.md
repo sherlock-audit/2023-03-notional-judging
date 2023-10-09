@@ -3,7 +3,7 @@
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/168 
 
 ## Found by 
-bin2chen, lemonmon, xiaoming90
+bin2chen, lemonmon, xiaoming90 + 0xleastwood
 ## Summary
 Malicious users can keep front-run `claimCOMPAndTransfer() ` to trigger `COMPTROLLER.claimComp() ` first, causing `netBalance` in `claimCOMPAndTransfer() ` to be 0 all the time, resulting in `COMP` not being transferred out and locked in the contract
 ## Vulnerability Detail
@@ -151,7 +151,7 @@ Escalation status:
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/172 
 
 ## Found by 
-bin2chen, xiaoming90
+bin2chen, xiaoming90 + 0xleastwood
 ## Summary
 
 in `repayAccountPrimeDebtAtSettlement() `
@@ -266,7 +266,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/135
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/183 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 `VaultAccountSecondaryDebtShareStorage.maturity` will be cleared prematurely during liquidation
@@ -518,7 +518,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/127
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/184 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 StrategyVault can perform a full exit without repaying all secondary debt, leaving bad debt with the protocol.
@@ -604,7 +604,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/128
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/190 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Transferring fee reserve assets to the treasury manager contract will result in a revert, leading to a loss of rewards for NOTE stakers.
@@ -679,7 +679,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/119
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/193 
 
 ## Found by 
-bin2chen, chaduke, iglyx, mstpr-brainbot, xiaoming90
+bin2chen, chaduke, iglyx, mstpr-brainbot, xiaoming90 + 0xleastwood
 ## Summary
 
 Excessive amounts of assets are being withdrawn from the money market.
@@ -765,7 +765,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/125
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/194 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 It is possible to liquidate past the debt outstanding above the min borrow without liquidating the entire debt outstanding. Thus, leaving accounts with small debt that are not profitable to unwind if it needs to liquidate.
@@ -896,7 +896,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/132
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/199 
 
 ## Found by 
-ShadowForce, xiaoming90
+ShadowForce, xiaoming90 + 0xleastwood
 ## Summary
 
 Vault liquidations will leave un-matured accounts with cash holdings which are then used to offset account debt during vault account settlements. As it stands, any excess cash received via interest accrual will be transferred back to the vault account directly. If a primary or secondary borrow currency is `ETH`, then this excess cash will be transferred natively. Consequently, the recipient may intentionally revert, causing account settlement to fail. 
@@ -1046,7 +1046,7 @@ Following is the function call flow for reference:
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/202 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Users can self-liquidate their secondary debt holdings in such a way that it is no longer possible to deleverage their vault account as `checkMinBorrow` will fail post-maturity.
@@ -1263,7 +1263,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/138
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/204 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Due to an incorrect implementation of `VaultValuation.getLiquidationFactors()`, Notional requires that a liquidator reduces an account's debt below `minBorrowSize`. This does not allow liquidators to partially liquidate a vault account into a healthy position and opens up the protocol to an edge case where an account is always ineligible for liquidation. 
@@ -1415,7 +1415,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/132
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/207 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 If excess cash was transferred out from an account during account settlement, then the protocol will check the account's collateral ratio and revert if the position is unhealthy. Because it may not be possible to settle a vault account, liquidators cannot reduce account debt by purchasing vault shares because `_authenticateDeleverage()` will check to see if a vault has matured.
@@ -2421,7 +2421,7 @@ Fixed in: https://github.com/notional-finance/contracts-v2/pull/134
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/175 
 
 ## Found by 
-0xGoodess, chaduke, xiaoming90
+0xGoodess, chaduke, xiaoming90 + 0xleastwood
 ## Summary
 
 A failure in an external money market can DOS the entire rebalance process in Notional.
@@ -2569,7 +2569,7 @@ https://github.com/notional-finance/contracts-v2/pull/117/files#diff-293f4ba7dc1
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/177 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 The current slippage control mechanism checks a user's acceptable interest rate limit against the post-trade rate, which could result in trades proceeding at rates exceeding the user's defined limit.
@@ -2727,7 +2727,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/126
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/179 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 There is a considerable difference in implementation behaviour when a vault has yet to mature compared to after vault settlement.
@@ -2787,7 +2787,7 @@ Although this issue is correct, the exit time is 1 minute. Will mark this as Won
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/181 
 
 ## Found by 
-ShadowForce, xiaoming90
+ShadowForce, xiaoming90 + 0xleastwood
 ## Summary
 
 The [deposit](https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/external/actions/TreasuryAction.sol#L318) and [redemption](https://github.com/sherlock-audit/2023-03-notional/blob/main/contracts-v2/contracts/internal/balances/TokenHandler.sol#L375) functions did not verify the return data from the external call, which might cause the contract to wrongly assume that the deposit/redemption went well although the action has actually failed in the background.
@@ -2870,7 +2870,7 @@ I agree that the severity of this issue should be lower. Labeled it as a medium.
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/189 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 If Compound has updated their interest rate model, then Notional will calculate the before total underlying token balance without accruing interest. If this exceeds `Constants.REBALANCING_UNDERLYING_DELTA`, then rebalance execution will revert.
@@ -2995,7 +2995,7 @@ Escalation status:
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/191 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Debt cannot be repaid without redeeming the vault share. As such, users have to redeem a certain amount of vault shares/strategy tokens at the current market price to work around this issue, which deprives users of potential gains from their vault shares if they maintain ownership until the end.
@@ -3139,7 +3139,7 @@ Fixed in: https://github.com/notional-finance/leveraged-vaults/pull/54
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/192 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 The vault exit might fail after a liquidation event, leading to users being unable to main their positions.
@@ -3202,7 +3202,7 @@ Fixed in: https://github.com/notional-finance/contracts-v2/pull/133
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/195 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Depositing or redeeming zero amount against certain external money markets will cause the rebalancing process to revert.
@@ -3360,7 +3360,7 @@ Fixed in: https://github.com/notional-finance/contracts-v2/pull/120
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/196 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 The off-chain accounting of fCash debt or prime cash in the settlement reserve will be inaccurate due to an error when handling the conversion between signed and unsigned integers.
@@ -3433,7 +3433,7 @@ Fixed: https://github.com/notional-finance/contracts-v2/pull/139
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/198 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Notional would not be able to rebalance its underlying holding when more holdings are added.
@@ -3631,7 +3631,7 @@ Escalation status:
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/205 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 The underlying delta is calculated on the internal token balance, which might cause inconsistency with tokens of varying decimals.
@@ -3722,7 +3722,7 @@ Good point, I forgot that was the case.
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/210 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Dust balances in primary debt are truncated toward zero. However, this truncation was not performed against secondary debts.
@@ -3809,7 +3809,7 @@ Sherlock note: Classifying this as fixed.
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/212 
 
 ## Found by 
-xiaoming90
+xiaoming90 + 0xleastwood
 ## Summary
 
 Secondary debts were not checked against the minimum borrow size during exit, which could lead to accounts with insufficient debt becoming insolvent and the protocol incurring bad debts.
@@ -3875,7 +3875,7 @@ Upon further review, it seems like the issue is invalid. Minimum borrow checks a
 Source: https://github.com/sherlock-audit/2023-03-notional-judging/issues/215 
 
 ## Found by 
-ShadowForce, xiaoming90
+ShadowForce, xiaoming90 + 0xleastwood
 ## Summary
 
 If the caller of any liquidation action is the vault itself, there is no validation of the `liquidator` parameter and therefore, any arbitrary account may act as the liquidator if they have approved any amount of funds for the `VaultLiquidationAction.sol` contract.
